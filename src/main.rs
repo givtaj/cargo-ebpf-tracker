@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use ebpf_tracker_events::stream_record_for_line;
+use serde::Deserialize;
 
 const DEFAULT_PROBE: &str = "/probes/execve.bt";
 const COMPOSE_FILE_NAME: &str = "docker-compose.bpftrace.yml";
@@ -87,53 +88,6 @@ struct ProbeConfig {
 enum EmitMode {
     Raw,
     Jsonl,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum EventKind {
-    Execve,
-    OpenAt,
-    Write,
-    Connect,
-}
-
-#[derive(Debug)]
-struct ParsedEvent {
-    kind: EventKind,
-    comm: String,
-    pid: u32,
-    file: Option<String>,
-    bytes: Option<u64>,
-    fd: Option<i32>,
-}
-
-#[derive(Debug)]
-enum ParsedLine {
-    Event(ParsedEvent),
-    Aggregate { name: String, value: u64 },
-    Text,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum StreamRecord {
-    Syscall {
-        timestamp_unix_ms: u64,
-        kind: &'static str,
-        comm: String,
-        pid: u32,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        file: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        bytes: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        fd: Option<i32>,
-    },
-    Aggregate {
-        timestamp_unix_ms: u64,
-        metric: String,
-        value: u64,
-    },
 }
 
 fn print_usage() {
@@ -564,109 +518,6 @@ where
     Ok(())
 }
 
-fn current_timestamp_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-fn parse_trace_line(line: &str) -> ParsedLine {
-    if let Some((name, value)) = parse_aggregate_line(line) {
-        return ParsedLine::Aggregate { name, value };
-    }
-
-    if let Some(event) = parse_event_line(line) {
-        return ParsedLine::Event(event);
-    }
-
-    ParsedLine::Text
-}
-
-impl EventKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            EventKind::Execve => "execve",
-            EventKind::OpenAt => "openat",
-            EventKind::Write => "write",
-            EventKind::Connect => "connect",
-        }
-    }
-}
-
-fn parse_aggregate_line(line: &str) -> Option<(String, u64)> {
-    let trimmed = line.trim();
-    if !trimmed.starts_with('@') {
-        return None;
-    }
-
-    let (name, value) = trimmed[1..].split_once(':')?;
-    let value = value.trim().parse().ok()?;
-    Some((name.trim().to_string(), value))
-}
-
-fn parse_event_line(line: &str) -> Option<ParsedEvent> {
-    let mut parts = line.split_whitespace();
-    let kind = match parts.next()? {
-        "execve" => EventKind::Execve,
-        "openat" => EventKind::OpenAt,
-        "write" => EventKind::Write,
-        "connect" => EventKind::Connect,
-        _ => return None,
-    };
-
-    let mut comm = None;
-    let mut pid = None;
-    let mut file = None;
-    let mut bytes = None;
-    let mut fd = None;
-
-    for part in parts {
-        let (key, value) = match part.split_once('=') {
-            Some(pair) => pair,
-            None => continue,
-        };
-
-        match key {
-            "comm" => comm = Some(value.to_string()),
-            "pid" => pid = value.parse().ok(),
-            "file" => file = Some(value.to_string()),
-            "bytes" => bytes = value.parse().ok(),
-            "fd" => fd = value.parse().ok(),
-            _ => {}
-        }
-    }
-
-    Some(ParsedEvent {
-        kind,
-        comm: comm?,
-        pid: pid?,
-        file,
-        bytes,
-        fd,
-    })
-}
-
-fn stream_record_for_line(line: &str) -> Option<StreamRecord> {
-    match parse_trace_line(line) {
-        ParsedLine::Event(event) => Some(StreamRecord::Syscall {
-            timestamp_unix_ms: current_timestamp_millis(),
-            kind: event.kind.as_str(),
-            comm: event.comm,
-            pid: event.pid,
-            file: event.file,
-            bytes: event.bytes,
-            fd: event.fd,
-        }),
-        ParsedLine::Aggregate { name, value } => Some(StreamRecord::Aggregate {
-            timestamp_unix_ms: current_timestamp_millis(),
-            metric: name,
-            value,
-        }),
-        ParsedLine::Text => None,
-    }
-}
-
 fn append_log_line(log_file: &Arc<Mutex<File>>, line: &str) -> io::Result<()> {
     let mut file = log_file
         .lock()
@@ -1025,9 +876,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_generated_probe, load_config, parse_event_line, stream_record_for_line, StreamRecord,
-    };
+    use super::{build_generated_probe, load_config};
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1067,62 +916,5 @@ mod tests {
         assert_eq!(config.probe.connect, Some(true));
 
         let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn parses_open_event_line() {
-        let parsed = parse_event_line("openat comm=session-io-demo pid=723 file=input/message.txt")
-            .expect("event line should parse");
-        assert_eq!(parsed.comm, "session-io-demo");
-        assert_eq!(parsed.pid, 723);
-        assert_eq!(parsed.file.as_deref(), Some("input/message.txt"));
-    }
-
-    #[test]
-    fn stream_record_serializes_syscall_fields() {
-        let record = stream_record_for_line("write comm=session-io-demo pid=723 bytes=239")
-            .expect("syscall should produce stream record");
-
-        match record {
-            StreamRecord::Syscall {
-                kind,
-                comm,
-                pid,
-                bytes,
-                file,
-                fd,
-                ..
-            } => {
-                assert_eq!(kind, "write");
-                assert_eq!(comm, "session-io-demo");
-                assert_eq!(pid, 723);
-                assert_eq!(bytes, Some(239));
-                assert_eq!(file, None);
-                assert_eq!(fd, None);
-            }
-            _ => panic!("expected syscall record"),
-        }
-    }
-
-    #[test]
-    fn stream_record_serializes_aggregate_fields() {
-        let record = stream_record_for_line("@writes: 5268")
-            .expect("aggregate should produce stream record");
-
-        match record {
-            StreamRecord::Aggregate { metric, value, .. } => {
-                assert_eq!(metric, "writes");
-                assert_eq!(value, 5268);
-            }
-            _ => panic!("expected aggregate record"),
-        }
-    }
-
-    #[test]
-    fn plain_text_does_not_enter_jsonl_stream() {
-        assert!(stream_record_for_line(
-            "Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.04s"
-        )
-        .is_none());
     }
 }

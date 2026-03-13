@@ -1,0 +1,15 @@
+[package]
+name = "ebpf-tracker-events"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared event parsing and JSONL schema for ebpf-tracker"
+publish = false
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

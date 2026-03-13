@@ -6,9 +6,18 @@ version = 4
 name = "ebpf-tracker"
 version = "0.1.0"
 dependencies = [
+ "ebpf-tracker-events",
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "ebpf-tracker-events"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

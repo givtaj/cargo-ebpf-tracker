@@ -113,6 +113,10 @@ In `jsonl` mode:
 That makes it easy to pipe the trace stream into another tool that renders a UI,
 stores the events, or applies custom filtering.
 
+The JSONL event contract now lives in the shared workspace crate
+`crates/ebpf-tracker-events`, so future consumers can reuse the same parsing and
+record schema without embedding CLI-specific code.
+
 ## Config
 
 If `ebpf-tracker.toml` exists in the current project, it is picked up automatically.
@@ -205,9 +209,24 @@ Expected today:
 - No process-tree-only or target-only filtering
 - No stable profile system like `minimal/default/full`
 
+## Workspace Direction
+
+This repo stays as one workspace, but the boundaries are now explicit:
+
+- the root package is the installable CLI that runs Docker + `bpftrace`
+- `crates/ebpf-tracker-events` owns the event parsing and JSONL stream schema
+- future viewers, OTLP exporters, or other consumers should be added as separate
+  crates under `crates/`
+- `examples/` stays reserved for runnable demo apps, not product code
+
+That keeps the core Unix contract clear: `eBPF_tracker` emits events, and other
+tools decide how to render, store, or forward them.
+
 ## Repo Layout
 
-- `Cargo.toml` and `src/main.rs`: Rust CLI
+- `Cargo.toml`: workspace manifest plus installable CLI package metadata
+- `src/main.rs`: installable CLI entry point
+- `crates/ebpf-tracker-events`: shared event schema and JSONL parsing crate
 - `ebpf-tracker.toml.example`: example config
 - `docker-compose.bpftrace.yml`: runtime definition
 - `docker/bpftrace-rust.Dockerfile`: runtime image
