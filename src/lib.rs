@@ -1,6 +1,8 @@
+use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::hash::{Hash, Hasher};
+use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -21,6 +23,7 @@ const GENERATED_CONFIG_PROBE_FILE_NAME: &str = "generated-config.bt";
 const GENERATED_RUNTIME_OVERRIDE_FILE_NAME: &str = "generated-runtime.override.yml";
 const DEFAULT_EXAMPLE_NAME: &str = "session-io-demo";
 const EXAMPLES_DIR_NAME: &str = "examples";
+const CONTAINER_CARGO_TARGET_ROOT: &str = "/cargo-target";
 const EMBEDDED_COMPOSE: &str = include_str!("../docker-compose.bpftrace.yml");
 const EMBEDDED_DOCKERFILE: &str = include_str!("../docker/bpftrace-rust.Dockerfile");
 const EMBEDDED_RUN_SCRIPT: &str = include_str!("../scripts/run-bpftrace-wrap.sh");
@@ -687,6 +690,10 @@ fn build_compose_command(
         "EBPF_TRACKER_TRANSPORT={}",
         cli_args.transport_mode.as_str()
     ));
+    command.arg("-e").arg(format!(
+        "CARGO_TARGET_DIR={}",
+        container_cargo_target_dir(project_dir)
+    ));
 
     if let Some(probe_file) = probe_file {
         command
@@ -706,6 +713,12 @@ fn build_compose_command(
         .env("PROJECT_DIR", project_dir);
 
     command
+}
+
+fn container_cargo_target_dir(project_dir: &Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    project_dir.to_string_lossy().hash(&mut hasher);
+    format!("{CONTAINER_CARGO_TARGET_ROOT}/{:016x}", hasher.finish())
 }
 
 fn timestamp_for_filename() -> String {
@@ -749,12 +762,66 @@ where
     Ok(())
 }
 
-fn append_log_line(log_file: &Arc<Mutex<File>>, line: &str) -> io::Result<()> {
+fn append_log_bytes(log_file: &Arc<Mutex<File>>, bytes: &[u8]) -> io::Result<()> {
     let mut file = log_file
         .lock()
         .map_err(|_| io::Error::other("log file lock poisoned"))?;
-    file.write_all(line.as_bytes())?;
+    file.write_all(bytes)?;
     file.flush()?;
+    Ok(())
+}
+
+fn trim_line_endings(bytes: &[u8]) -> &[u8] {
+    let mut end = bytes.len();
+    while end > 0 && matches!(bytes[end - 1], b'\n' | b'\r') {
+        end -= 1;
+    }
+    &bytes[..end]
+}
+
+fn stream_record_for_bytes(
+    line_bytes: &[u8],
+    transport_mode: TransportMode,
+) -> Option<StreamRecord> {
+    let trimmed = trim_line_endings(line_bytes);
+    let text = String::from_utf8_lossy(trimmed);
+
+    match transport_mode {
+        TransportMode::Bpftrace => stream_record_for_line(&text),
+        TransportMode::Perf => stream_record_for_perf_trace_line(&text),
+    }
+}
+
+fn forward_passthrough_bytes(bytes: &[u8], terminal_lock: &Arc<Mutex<()>>) -> io::Result<()> {
+    let _terminal = terminal_lock
+        .lock()
+        .map_err(|_| io::Error::other("terminal lock poisoned"))?;
+    let mut stderr = io::stderr();
+    stderr.write_all(bytes)?;
+    stderr.flush()?;
+    Ok(())
+}
+
+fn process_jsonl_line_bytes(
+    line_bytes: &[u8],
+    log_file: Option<&Arc<Mutex<File>>>,
+    terminal_lock: &Arc<Mutex<()>>,
+    transport_mode: TransportMode,
+    summary: &mut JsonlCopySummary,
+) -> io::Result<()> {
+    if let Some(log_file) = log_file {
+        append_log_bytes(log_file, line_bytes)?;
+    }
+
+    if let Some(record) = stream_record_for_bytes(line_bytes, transport_mode) {
+        if transport_mode == TransportMode::Perf {
+            summary.perf_session.observe(&record);
+        }
+        emit_stream_record(&record, terminal_lock)?;
+    } else {
+        forward_passthrough_bytes(line_bytes, terminal_lock)?;
+    }
+
     Ok(())
 }
 
@@ -801,39 +868,38 @@ fn copy_stream_jsonl<R: Read>(
     transport_mode: TransportMode,
 ) -> io::Result<JsonlCopySummary> {
     let mut reader = BufReader::new(reader);
-    let mut line = String::new();
+    let mut buffer = [0u8; 16 * 1024];
+    let mut pending = Vec::new();
     let mut summary = JsonlCopySummary::default();
 
     loop {
-        line.clear();
-        let read = reader.read_line(&mut line)?;
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
 
-        if let Some(log_file) = &log_file {
-            append_log_line(log_file, &line)?;
-        }
+        pending.extend_from_slice(&buffer[..read]);
 
-        let trimmed = line.trim_end_matches(['\n', '\r']);
-        let record = match transport_mode {
-            TransportMode::Bpftrace => stream_record_for_line(trimmed),
-            TransportMode::Perf => stream_record_for_perf_trace_line(trimmed),
-        };
-
-        if let Some(record) = record {
-            if transport_mode == TransportMode::Perf {
-                summary.perf_session.observe(&record);
-            }
-            emit_stream_record(&record, &terminal_lock)?;
-        } else {
-            let _terminal = terminal_lock
-                .lock()
-                .map_err(|_| io::Error::other("terminal lock poisoned"))?;
-            let mut stderr = io::stderr();
-            stderr.write_all(line.as_bytes())?;
-            stderr.flush()?;
+        while let Some(newline_index) = pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = pending.drain(..=newline_index).collect();
+            process_jsonl_line_bytes(
+                &line,
+                log_file.as_ref(),
+                &terminal_lock,
+                transport_mode,
+                &mut summary,
+            )?;
         }
+    }
+
+    if !pending.is_empty() {
+        process_jsonl_line_bytes(
+            &pending,
+            log_file.as_ref(),
+            &terminal_lock,
+            transport_mode,
+            &mut summary,
+        )?;
     }
 
     Ok(summary)
@@ -1171,8 +1237,13 @@ pub fn main_entry() -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_generated_probe, build_runtime_override, load_config, RuntimeConfig};
+    use super::{
+        build_generated_probe, build_runtime_override, container_cargo_target_dir, load_config,
+        stream_record_for_bytes, RuntimeConfig, TransportMode,
+    };
+    use ebpf_tracker_events::StreamRecord;
     use std::fs;
+    use std::path::Path;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1287,5 +1358,49 @@ mod tests {
             pids_limit: Some(0),
         })
         .is_err());
+    }
+
+    #[test]
+    fn container_target_dir_is_stable_for_a_project() {
+        let project_dir = Path::new("/tmp/payment-engine");
+        let first = container_cargo_target_dir(project_dir);
+        let second = container_cargo_target_dir(project_dir);
+
+        assert_eq!(first, second);
+        assert!(first.starts_with("/cargo-target/"));
+    }
+
+    #[test]
+    fn container_target_dir_differs_between_projects() {
+        let first = container_cargo_target_dir(Path::new("/tmp/payment-engine"));
+        let second = container_cargo_target_dir(Path::new("/tmp/session-io-demo"));
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn invalid_utf8_stream_bytes_do_not_abort_jsonl_parsing() {
+        let record = stream_record_for_bytes(b"\xff\xfe\xfd\n", TransportMode::Perf);
+        assert!(record.is_none());
+    }
+
+    #[test]
+    fn ascii_stream_bytes_still_parse_into_records() {
+        let record = stream_record_for_bytes(
+            b"write comm=payments_engine pid=42 bytes=512\n",
+            TransportMode::Bpftrace,
+        )
+        .expect("ascii event line should parse");
+
+        match record {
+            StreamRecord::Syscall {
+                comm, bytes, pid, ..
+            } => {
+                assert_eq!(comm, "payments_engine");
+                assert_eq!(pid, 42);
+                assert_eq!(bytes, Some(512));
+            }
+            _ => panic!("expected syscall record"),
+        }
     }
 }

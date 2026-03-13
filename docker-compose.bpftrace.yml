@@ -8,4 +8,8 @@ services:
     working_dir: /workspace
     volumes:
       - ${PROJECT_DIR:?set PROJECT_DIR}:/workspace
+      - cargo-target-cache:/cargo-target
       - ./probes:/probes:ro
+
+volumes:
+  cargo-target-cache:

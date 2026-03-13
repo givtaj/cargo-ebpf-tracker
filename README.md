@@ -23,6 +23,16 @@ eBPF_tracker cargo run
 
 you are tracing the full wrapped command session. That means you will often see `cargo`, `rustc`, linkers, and then your app. This is current behavior, not a bug.
 
+## Why A Customer Cares
+
+For a customer, this becomes:
+
+- Explainability: "what did my command actually do?"
+- Input provenance: "which file drove this result?"
+- Safety checks: "did this CLI unexpectedly touch network or extra files?"
+- CI regression detection: "did a new version start reading more files or writing much more?"
+- Test transparency: "which fixtures did the suite actually consume?"
+
 ## Release Scope
 
 For v0.1, the product contract is:
@@ -177,6 +187,11 @@ Available flags:
 
 See `ebpf-tracker.toml.example`.
 
+## External Example
+
+For a real installed-user walkthrough against a separate public Rust project,
+see [Trace `givtaj/payment-engine`](./docs/trace-payment-engine.md).
+
 ## Repo Workspace Helpers
 
 If you have cloned this repository, the workspace also includes:
@@ -306,6 +321,8 @@ Expected today:
 - Add a separate viewer crate that reads JSONL from `stdin` and renders a first trace-focused TUI on top of the stream
 - Improve the OTel mapping with parent/child process relationships and better span/event semantics for Jaeger and other collectors
 - Add direct perf-event-array or ringbuf transport after the event model and stream UX are stable
+- Add regression coverage for JSONL mode when Docker, `perf`, or wrapped commands emit non-UTF-8 bytes on `stderr`
+- Keep hardening container-side Cargo isolation so tracing external repos never pollutes host `target/` trees across platforms
 
 ## Workspace Direction
 
