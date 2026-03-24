@@ -299,6 +299,8 @@ cargo build --bin eBPF_tracker
 ```
 
 That starts the demo trace and opens the live dashboard automatically.
+You can also run the repo-built binary from outside the repo, for example
+`/path/to/cargo-ebpf-tracker/target/debug/eBPF_tracker demo session-io-demo`.
 
 Structured stream version:
 

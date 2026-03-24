@@ -1295,17 +1295,42 @@ fn run_with_log(mut command: Command, project_dir: &Path) -> Result<i32, String>
     Ok(exit_code(status))
 }
 
-fn repo_root_from(start_dir: &Path) -> Result<PathBuf, String> {
+fn is_repo_root(candidate: &Path) -> bool {
+    let manifest = candidate.join("Cargo.toml");
+    let main_rs = candidate.join("src").join("main.rs");
+    let examples = candidate.join(EXAMPLES_DIR_NAME);
+    manifest.is_file() && main_rs.is_file() && examples.is_dir()
+}
+
+fn find_repo_root(start_dir: &Path) -> Option<PathBuf> {
     for ancestor in start_dir.ancestors() {
-        let manifest = ancestor.join("Cargo.toml");
-        let main_rs = ancestor.join("src").join("main.rs");
-        let examples = ancestor.join(EXAMPLES_DIR_NAME);
-        if manifest.is_file() && main_rs.is_file() && examples.is_dir() {
-            return Ok(ancestor.to_path_buf());
+        if is_repo_root(ancestor) {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+fn repo_root_from(start_dir: &Path) -> Result<PathBuf, String> {
+    if let Some(repo_root) = find_repo_root(start_dir) {
+        return Ok(repo_root);
+    }
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(repo_root) = find_repo_root(&exe) {
+            return Ok(repo_root);
         }
     }
 
-    Err("demo mode must be run from the repository root or one of its subdirectories".to_string())
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if is_repo_root(&manifest_dir) {
+        return Ok(manifest_dir);
+    }
+
+    Err(
+        "demo mode requires a local cargo-ebpf-tracker checkout or a repo-built eBPF_tracker binary"
+            .to_string(),
+    )
 }
 
 fn demo_manifest_path(example_dir: &Path) -> PathBuf {
@@ -1547,13 +1572,13 @@ mod tests {
     use super::{
         build_demo_args_for_dashboard, build_generated_probe, build_runtime_override,
         build_tracker_args_for_dashboard, load_config, load_demo_manifest, parse_args,
-        parse_dashboard_url, stream_record_for_bytes, DashboardOptions, EmitMode, ParseOutcome,
-        RuntimeConfig, TransportMode, DEFAULT_DASHBOARD_PORT,
+        parse_dashboard_url, repo_root_from, stream_record_for_bytes, DashboardOptions, EmitMode,
+        ParseOutcome, RuntimeConfig, TransportMode, DEFAULT_DASHBOARD_PORT,
     };
     use crate::runtime::RuntimeSelection;
     use ebpf_tracker_events::StreamRecord;
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1868,6 +1893,18 @@ mod tests {
             parse_dashboard_url("live trace viewer on http://127.0.0.1:43115\n"),
             Some("http://127.0.0.1:43115")
         );
+    }
+
+    #[test]
+    fn repo_root_can_be_resolved_from_outside_repo_for_repo_built_binary() {
+        let temp_dir = unique_temp_dir("ebpf-demo-outside-repo");
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+
+        let repo_root =
+            repo_root_from(&temp_dir).expect("repo-built binaries should resolve the repo root");
+        assert_eq!(repo_root, PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     #[test]
