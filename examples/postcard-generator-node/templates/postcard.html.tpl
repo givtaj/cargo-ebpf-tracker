@@ -84,6 +84,36 @@
         border-left: 4px solid var(--accent);
       }
 
+      .brand-strip {
+        display: grid;
+        gap: 12px;
+        margin: 0 0 20px;
+      }
+
+      .brand-chip {
+        padding: 14px 16px;
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(255,255,255,0.96), rgba(240, 229, 210, 0.82));
+        border: 1px solid rgba(25, 50, 74, 0.12);
+      }
+
+      .brand-chip small {
+        display: block;
+        margin-bottom: 6px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: rgba(25, 50, 74, 0.64);
+      }
+
+      .brand-chip strong {
+        display: block;
+        font-size: 1.1rem;
+      }
+
+      .brand-chip p {
+        margin: 8px 0 0;
+      }
+
       pre {
         margin: 0;
         padding: 18px;
@@ -108,6 +138,18 @@
           <img src="postcard.svg" alt="Generated postcard artwork">
         </div>
         <div class="card details">
+          <div class="brand-strip">
+            <div class="brand-chip">
+              <small>Product</small>
+              <strong>{{product_name}}</strong>
+              <p>{{product_tagline}}</p>
+            </div>
+            <div class="brand-chip">
+              <small>Presented by</small>
+              <strong>{{sponsor_name}}</strong>
+              <p>{{sponsor_message}}</p>
+            </div>
+          </div>
           <h1>{{title}}</h1>
           <p class="lede">{{message}}</p>
           <div class="meta">

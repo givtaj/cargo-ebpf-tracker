@@ -381,7 +381,9 @@ mod tests {
                 assert_eq!(bytes, None);
                 assert_eq!(fd, None);
             }
-            StreamRecord::Aggregate { .. } => panic!("expected syscall record"),
+            StreamRecord::Aggregate { .. } | StreamRecord::Session { .. } => {
+                panic!("expected syscall record")
+            }
         }
     }
 
@@ -395,7 +397,9 @@ mod tests {
 
         match record {
             StreamRecord::Syscall { file, .. } => assert_eq!(file, None),
-            StreamRecord::Aggregate { .. } => panic!("expected syscall record"),
+            StreamRecord::Aggregate { .. } | StreamRecord::Session { .. } => {
+                panic!("expected syscall record")
+            }
         }
     }
 

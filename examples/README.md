@@ -34,7 +34,29 @@ cargo demo --list
 ```
 
 Under the hood, `cargo demo` is a Cargo alias that runs the Rust CLI's `demo`
-subcommand. The examples are designed to be launched from the repository root.
+subcommand. Each example is declared by an `ebpf-demo.toml` manifest inside its
+directory:
+
+- `runtime` selects the Rust or Node tracing image
+- `command` is the traced command to run inside that example
+- `clean` is optional and runs before launch
+- `product_*` and `sponsor_*` fields are optional demo-branding metadata that
+  the viewer and replay logs preserve
+
+From a repo-built binary, the same manifests can also be launched outside the
+repository root:
+
+```bash
+/path/to/cargo-ebpf-tracker/target/debug/eBPF_tracker demo session-io-demo
+/path/to/cargo-ebpf-tracker/target/debug/eBPF_tracker demo --dashboard session-io-demo
+```
+
+Dashboard runs still execute the example's `ebpf-demo.toml` manifest, but they
+also preserve a replayable session log in that example's `logs/` directory.
+Use `cargo viewer -- --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log` to walk
+backward or forward through a stored run.
+That stored log now includes the manifest's product/sponsor metadata as a
+typed `session` record, so replay keeps the same demo branding as the live run.
 
 For a tool-friendly event stream instead of human-oriented terminal output:
 
@@ -71,8 +93,16 @@ cargo demo --emit jsonl session-io-demo | cargo otel --target jaeger --service-n
 
 - the first run may build the Docker image
 - trace output will include the whole wrapped command session, not only your app
+- raw JSONL may include Cargo, wrapper, and container-runtime noise around the app
 - files written by the example stay inside that example directory, usually under
   `logs/`
+
+For `session-io-demo`, the app-level signal to look for is usually:
+
+- `open_at` on `input/message.txt`
+- `connect` from `session-io-demo`
+- `open_at` on `logs/session-summary.txt`
+- `write` from `session-io-demo`
 
 ## Available Examples
 

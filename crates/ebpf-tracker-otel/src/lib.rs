@@ -218,6 +218,12 @@ pub fn build_session_trace(records: &[StreamRecord]) -> SessionTrace {
 
     for record in records {
         match record {
+            StreamRecord::Session {
+                timestamp_unix_ms, ..
+            } => {
+                started_unix_ms = started_unix_ms.min(*timestamp_unix_ms);
+                finished_unix_ms = finished_unix_ms.max(*timestamp_unix_ms);
+            }
             StreamRecord::Syscall {
                 timestamp_unix_ms,
                 kind,

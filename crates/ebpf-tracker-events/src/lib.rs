@@ -42,6 +42,19 @@ pub enum ParsedLine {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum StreamRecord {
+    Session {
+        timestamp_unix_ms: u64,
+        demo_name: String,
+        product_name: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        product_tagline: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sponsor_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sponsor_message: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sponsor_url: Option<String>,
+    },
     Syscall {
         timestamp_unix_ms: u64,
         kind: EventKind,
@@ -228,6 +241,27 @@ mod tests {
             }
             _ => panic!("expected aggregate record"),
         }
+    }
+
+    #[test]
+    fn session_record_serializes_branding_fields() {
+        let record = StreamRecord::Session {
+            timestamp_unix_ms: 789,
+            demo_name: "postcard-generator-rust".to_string(),
+            product_name: "eBPF_tracker".to_string(),
+            product_tagline: Some("Trace the full command session".to_string()),
+            sponsor_name: Some("cargo-ebpf-tracker".to_string()),
+            sponsor_message: Some("Replayable syscall demos for Rust and Node".to_string()),
+            sponsor_url: Some("https://github.com/givtaj/cargo-ebpf-tracker".to_string()),
+        };
+
+        let json = serde_json::to_value(&record).expect("record should serialize");
+
+        assert_eq!(json["type"], "session");
+        assert_eq!(json["demo_name"], "postcard-generator-rust");
+        assert_eq!(json["product_name"], "eBPF_tracker");
+        assert_eq!(json["product_tagline"], "Trace the full command session");
+        assert_eq!(json["sponsor_name"], "cargo-ebpf-tracker");
     }
 
     #[test]

@@ -6,16 +6,17 @@ async function main() {
   const title = readTrimmed("input/title.txt");
   const message = readTrimmed("input/message.txt");
   const palette = readPalette("input/palette.txt");
+  const branding = loadDemoBranding();
   const template = fs.readFileSync("templates/postcard.html.tpl", "utf8");
   const generatedAt = runDateStamp();
   const serverReply = await requestStampApproval(title, message);
 
   fs.mkdirSync("dist", { recursive: true });
 
-  const svg = renderSvg(title, message, palette, serverReply, generatedAt);
+  const svg = renderSvg(title, message, palette, serverReply, generatedAt, branding);
   fs.writeFileSync("dist/postcard.svg", svg);
 
-  const summaryJson = renderSummaryJson(title, message, generatedAt, serverReply);
+  const summaryJson = renderSummaryJson(title, message, generatedAt, serverReply, branding);
   fs.writeFileSync("dist/summary.json", summaryJson);
 
   const html = renderHtml(
@@ -25,7 +26,8 @@ async function main() {
     generatedAt,
     serverReply,
     summaryJson,
-    palette
+    palette,
+    branding
   );
   fs.writeFileSync("dist/postcard.html", html);
 
@@ -49,6 +51,23 @@ function readPalette(path) {
     palette[key.trim()] = value.trim();
   }
   return palette;
+}
+
+function loadDemoBranding() {
+  return {
+    productName: process.env.EBPF_TRACKER_DEMO_PRODUCT_NAME || "eBPF_tracker",
+    productTagline:
+      process.env.EBPF_TRACKER_DEMO_PRODUCT_TAGLINE ||
+      "Trace the full command session, then replay it.",
+    sponsorName:
+      process.env.EBPF_TRACKER_DEMO_SPONSOR_NAME || "cargo-ebpf-tracker",
+    sponsorMessage:
+      process.env.EBPF_TRACKER_DEMO_SPONSOR_MESSAGE ||
+      "Replayable syscall demos for Rust and Node.",
+    sponsorUrl:
+      process.env.EBPF_TRACKER_DEMO_SPONSOR_URL ||
+      "https://github.com/givtaj/cargo-ebpf-tracker"
+  };
 }
 
 function runDateStamp() {
@@ -87,9 +106,11 @@ async function requestStampApproval(title, message) {
   });
 }
 
-function renderSvg(title, message, palette, serverReply, generatedAt) {
+function renderSvg(title, message, palette, serverReply, generatedAt, branding) {
   const shortReply = truncate(serverReply, 48);
   const lines = wrapMessage(truncate(message, 96), 30);
+  const productName = truncate(branding.productName, 24);
+  const sponsorName = truncate(branding.sponsorName, 24);
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" role="img" aria-labelledby="title desc">
   <title id="title">${xmlEscape(title)}</title>
   <desc id="desc">${xmlEscape(message)}</desc>
@@ -120,11 +141,13 @@ function renderSvg(title, message, palette, serverReply, generatedAt) {
   <text x="650" y="334" fill="${palette.ink}" font-family="Georgia, serif" font-size="28">Visual Debugger</text>
   <text x="650" y="372" fill="${palette.ink}" font-family="Georgia, serif" font-size="22">127 Trace Street</text>
   <text x="650" y="406" fill="${palette.ink}" font-family="Georgia, serif" font-size="22">Docker City, LN</text>
+  <text x="650" y="454" fill="${palette.accent}" font-family="'Courier New', monospace" font-size="14">Powered by ${xmlEscape(productName)}</text>
+  <text x="650" y="478" fill="${palette.shadow}" font-family="'Courier New', monospace" font-size="12">${xmlEscape(sponsorName)}</text>
 </svg>
 `;
 }
 
-function renderHtml(template, title, message, generatedAt, serverReply, summaryJson, palette) {
+function renderHtml(template, title, message, generatedAt, serverReply, summaryJson, palette, branding) {
   return template
     .replaceAll("{{title}}", htmlEscape(title))
     .replaceAll("{{message}}", htmlEscape(message))
@@ -135,16 +158,25 @@ function renderHtml(template, title, message, generatedAt, serverReply, summaryJ
     .replaceAll("{{ink}}", palette.ink)
     .replaceAll("{{accent}}", palette.accent)
     .replaceAll("{{stamp}}", palette.stamp)
-    .replaceAll("{{shadow}}", palette.shadow);
+    .replaceAll("{{shadow}}", palette.shadow)
+    .replaceAll("{{product_name}}", htmlEscape(branding.productName))
+    .replaceAll("{{product_tagline}}", htmlEscape(branding.productTagline))
+    .replaceAll("{{sponsor_name}}", htmlEscape(branding.sponsorName))
+    .replaceAll("{{sponsor_message}}", htmlEscape(branding.sponsorMessage));
 }
 
-function renderSummaryJson(title, message, generatedAt, serverReply) {
+function renderSummaryJson(title, message, generatedAt, serverReply, branding) {
   return JSON.stringify(
     {
       title,
       message,
       generated_at: generatedAt,
-      server_reply: serverReply
+      server_reply: serverReply,
+      product_name: branding.productName,
+      product_tagline: branding.productTagline,
+      sponsor_name: branding.sponsorName,
+      sponsor_message: branding.sponsorMessage,
+      sponsor_url: branding.sponsorUrl
     },
     null,
     2

@@ -2,6 +2,17 @@
 
 This example renders a visual postcard with plain Rust so `eBPF_tracker` can
 show the full file, network, process, and output activity of one small command.
+The generated HTML, SVG, and summary JSON also carry the demo's product and
+sponsor branding so the artifact itself can double as a product-facing demo.
+
+Manifest for this example:
+
+```toml
+runtime = "rust"
+command = ["cargo", "run", "--quiet"]
+product_name = "eBPF_tracker"
+product_tagline = "Trace the full command session, then replay it."
+```
 
 What it does:
 

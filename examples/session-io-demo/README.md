@@ -6,6 +6,15 @@ the Rust code.
 
 It is meant to be run from a local clone of `cargo-ebpf-tracker`.
 
+Manifest for this example:
+
+```toml
+runtime = "rust"
+command = ["cargo", "run"]
+clean = ["cargo", "clean", "--quiet", "--target-dir", "target"]
+product_name = "eBPF_tracker"
+```
+
 What the demo does:
 
 - `build.rs` reads `input/message.txt` and writes generated Rust into `target`
@@ -18,6 +27,24 @@ Run it from the repo root:
 ```bash
 cargo demo session-io-demo
 ```
+
+Run the same manifest from anywhere with a repo-built binary:
+
+```bash
+/path/to/cargo-ebpf-tracker/target/debug/eBPF_tracker demo session-io-demo
+```
+
+Open the live dashboard for the same example:
+
+```bash
+/path/to/cargo-ebpf-tracker/target/debug/eBPF_tracker demo --dashboard session-io-demo
+```
+
+That dashboard run still uses the same `ebpf-demo.toml` manifest and now keeps
+a replayable trace log under `logs/`, so you can reopen the session later with
+`cargo viewer -- --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log`.
+The viewer also reads the manifest's product/sponsor metadata from the stored
+`session` record, so replay carries the same demo branding as the live run.
 
 Stream the same demo as JSON Lines:
 
@@ -54,6 +81,15 @@ Look for trace lines that show the benefit:
 - `write` calls during code generation and runtime output
 - `connect` from the demo binary to `127.0.0.1`
 - `execve` from the overall Cargo session
+
+In the raw JSONL stream you will also see expected session noise from `cargo`,
+the exec wrapper, and sometimes container-runtime processes. The clean
+app-level sequence is:
+
+- `openat` on `input/message.txt`
+- `connect` from `session-io-demo`
+- `openat` on `logs/session-summary.txt`
+- `write` from `session-io-demo`
 
 Why this is a good first example:
 

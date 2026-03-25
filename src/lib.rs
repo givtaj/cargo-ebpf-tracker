@@ -27,8 +27,13 @@ const GENERATED_RUNTIME_OVERRIDE_FILE_NAME: &str = "generated-runtime.override.y
 const DEFAULT_EXAMPLE_NAME: &str = "session-io-demo";
 const EXAMPLES_DIR_NAME: &str = "examples";
 const DEMO_MANIFEST_FILE_NAME: &str = "ebpf-demo.toml";
-const DASHBOARD_SCRIPT_NAME: &str = "scripts/live-trace-matrix.js";
 const DEFAULT_DASHBOARD_PORT: u16 = 43115;
+const DEMO_ENV_NAME: &str = "EBPF_TRACKER_DEMO_NAME";
+const DEMO_ENV_PRODUCT_NAME: &str = "EBPF_TRACKER_DEMO_PRODUCT_NAME";
+const DEMO_ENV_PRODUCT_TAGLINE: &str = "EBPF_TRACKER_DEMO_PRODUCT_TAGLINE";
+const DEMO_ENV_SPONSOR_NAME: &str = "EBPF_TRACKER_DEMO_SPONSOR_NAME";
+const DEMO_ENV_SPONSOR_MESSAGE: &str = "EBPF_TRACKER_DEMO_SPONSOR_MESSAGE";
+const DEMO_ENV_SPONSOR_URL: &str = "EBPF_TRACKER_DEMO_SPONSOR_URL";
 const GENERATED_EXEC_PROBE: &str = r#"tracepoint:syscalls:sys_enter_execve
 /comm != "bpftrace"/
 {
@@ -67,12 +72,15 @@ struct CliArgs {
     runtime_selection: RuntimeSelection,
     dashboard: DashboardOptions,
     command: Vec<String>,
+    session_record: Option<StreamRecord>,
+    extra_env: Vec<(String, String)>,
 }
 
 #[derive(Debug)]
 struct DemoArgs {
     example_name: Option<String>,
     list_examples: bool,
+    log_enable: bool,
     emit_mode: EmitMode,
     transport_mode: TransportMode,
     dashboard: DashboardOptions,
@@ -83,6 +91,68 @@ struct DemoManifest {
     runtime_selection: RuntimeSelection,
     command: Vec<String>,
     clean_command: Option<Vec<String>>,
+    branding: DemoBranding,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct DemoBranding {
+    product_name: Option<String>,
+    product_tagline: Option<String>,
+    sponsor_name: Option<String>,
+    sponsor_message: Option<String>,
+    sponsor_url: Option<String>,
+}
+
+impl DemoBranding {
+    fn is_empty(&self) -> bool {
+        self.product_name.is_none()
+            && self.product_tagline.is_none()
+            && self.sponsor_name.is_none()
+            && self.sponsor_message.is_none()
+            && self.sponsor_url.is_none()
+    }
+
+    fn session_record(&self, example_name: &str) -> Option<StreamRecord> {
+        if self.is_empty() {
+            return None;
+        }
+
+        let product_name = self
+            .product_name
+            .clone()
+            .unwrap_or_else(|| "eBPF_tracker".to_string());
+        Some(StreamRecord::Session {
+            timestamp_unix_ms: current_timestamp_millis(),
+            demo_name: example_name.to_string(),
+            product_name,
+            product_tagline: self.product_tagline.clone(),
+            sponsor_name: self.sponsor_name.clone(),
+            sponsor_message: self.sponsor_message.clone(),
+            sponsor_url: self.sponsor_url.clone(),
+        })
+    }
+
+    fn extra_env(&self, example_name: &str) -> Vec<(String, String)> {
+        let mut env = vec![(DEMO_ENV_NAME.to_string(), example_name.to_string())];
+
+        if let Some(value) = &self.product_name {
+            env.push((DEMO_ENV_PRODUCT_NAME.to_string(), value.clone()));
+        }
+        if let Some(value) = &self.product_tagline {
+            env.push((DEMO_ENV_PRODUCT_TAGLINE.to_string(), value.clone()));
+        }
+        if let Some(value) = &self.sponsor_name {
+            env.push((DEMO_ENV_SPONSOR_NAME.to_string(), value.clone()));
+        }
+        if let Some(value) = &self.sponsor_message {
+            env.push((DEMO_ENV_SPONSOR_MESSAGE.to_string(), value.clone()));
+        }
+        if let Some(value) = &self.sponsor_url {
+            env.push((DEMO_ENV_SPONSOR_URL.to_string(), value.clone()));
+        }
+
+        env
+    }
 }
 
 enum ParseOutcome {
@@ -135,6 +205,11 @@ struct DemoManifestFile {
     runtime: String,
     command: Vec<String>,
     clean: Option<Vec<String>>,
+    product_name: Option<String>,
+    product_tagline: Option<String>,
+    sponsor_name: Option<String>,
+    sponsor_message: Option<String>,
+    sponsor_url: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,12 +451,15 @@ fn parse_args(args: Vec<String>) -> Result<ParseOutcome, String> {
         runtime_selection,
         dashboard,
         command,
+        session_record: None,
+        extra_env: Vec::new(),
     }))
 }
 
 fn parse_demo_args(args: &[String]) -> Result<ParseOutcome, String> {
     let mut example_name = None;
     let mut list_examples = false;
+    let mut log_enable = false;
     let mut emit_mode = EmitMode::Raw;
     let mut transport_mode = TransportMode::Bpftrace;
     let mut dashboard = DashboardOptions::default();
@@ -393,6 +471,10 @@ fn parse_demo_args(args: &[String]) -> Result<ParseOutcome, String> {
             "-h" | "--help" => return Ok(ParseOutcome::Help),
             "--list" => {
                 list_examples = true;
+                index += 1;
+            }
+            "--log-enable" => {
+                log_enable = true;
                 index += 1;
             }
             "--emit" => {
@@ -456,6 +538,7 @@ fn parse_demo_args(args: &[String]) -> Result<ParseOutcome, String> {
     Ok(ParseOutcome::Demo(DemoArgs {
         example_name,
         list_examples,
+        log_enable,
         emit_mode,
         transport_mode,
         dashboard,
@@ -705,9 +788,7 @@ fn build_tracker_args_for_dashboard(cli_args: &CliArgs) -> Vec<String> {
         args.push(config_path.display().to_string());
     }
 
-    if cli_args.log_enable {
-        args.push("--log-enable".to_string());
-    }
+    args.push("--log-enable".to_string());
 
     args.push("--emit".to_string());
     args.push(EmitMode::Jsonl.as_str().to_string());
@@ -724,6 +805,7 @@ fn build_tracker_args_for_dashboard(cli_args: &CliArgs) -> Vec<String> {
 fn build_demo_args_for_dashboard(demo_args: &DemoArgs) -> Vec<String> {
     let mut args = vec![
         "demo".to_string(),
+        "--log-enable".to_string(),
         "--emit".to_string(),
         EmitMode::Jsonl.as_str().to_string(),
         "--transport".to_string(),
@@ -742,29 +824,7 @@ fn build_demo_args_for_dashboard(demo_args: &DemoArgs) -> Vec<String> {
 }
 
 fn resolve_dashboard_script() -> Result<PathBuf, String> {
-    let mut candidates = Vec::new();
-
-    if let Ok(current_dir) = env::current_dir() {
-        candidates.push(current_dir.join(DASHBOARD_SCRIPT_NAME));
-    }
-
-    if let Ok(exe) = env::current_exe() {
-        for ancestor in exe.ancestors() {
-            candidates.push(ancestor.join(DASHBOARD_SCRIPT_NAME));
-        }
-    }
-
-    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(DASHBOARD_SCRIPT_NAME));
-
-    for candidate in candidates {
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-
-    Err(format!(
-        "dashboard mode requires a local checkout with {DASHBOARD_SCRIPT_NAME}"
-    ))
+    ebpf_tracker_viewer::viewer_script_path()
 }
 
 fn parse_dashboard_url(line: &str) -> Option<&str> {
@@ -950,6 +1010,10 @@ fn build_compose_command(
             .arg(format!("EBPF_TRACKER_PERF_EVENTS={perf_events}"));
     }
 
+    for (key, value) in &cli_args.extra_env {
+        command.arg("-e").arg(format!("{key}={value}"));
+    }
+
     command
         .arg("bpftrace")
         .args(wrapped_command)
@@ -973,6 +1037,13 @@ fn timestamp_for_filename() -> String {
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
     fallback.to_string()
+}
+
+fn current_timestamp_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn copy_stream<R, W>(mut reader: R, mut terminal: W, log_file: Arc<Mutex<File>>) -> io::Result<()>
@@ -1081,6 +1152,23 @@ fn emit_stream_record(record: &StreamRecord, terminal_lock: &Arc<Mutex<()>>) -> 
     Ok(())
 }
 
+fn emit_initial_stream_record(
+    record: &StreamRecord,
+    log_file: Option<&Arc<Mutex<File>>>,
+    terminal_lock: &Arc<Mutex<()>>,
+) -> io::Result<()> {
+    emit_stream_record(record, terminal_lock)?;
+
+    if let Some(log_file) = log_file {
+        let serialized =
+            serde_json::to_string(record).map_err(|err| io::Error::other(err.to_string()))?;
+        append_log_bytes(log_file, serialized.as_bytes())?;
+        append_log_bytes(log_file, b"\n")?;
+    }
+
+    Ok(())
+}
+
 fn create_log_file(project_dir: &Path) -> Result<(Arc<Mutex<File>>, PathBuf), String> {
     let logs_dir = project_dir.join("logs");
     fs::create_dir_all(&logs_dir)
@@ -1147,6 +1235,7 @@ fn run_with_jsonl(
     project_dir: &Path,
     log_enable: bool,
     transport_mode: TransportMode,
+    initial_record: Option<&StreamRecord>,
 ) -> Result<i32, String> {
     let mut child = command
         .stdin(Stdio::inherit())
@@ -1173,6 +1262,11 @@ fn run_with_jsonl(
     };
 
     let terminal_lock = Arc::new(Mutex::new(()));
+
+    if let Some(record) = initial_record {
+        emit_initial_stream_record(record, log_file.as_ref(), &terminal_lock)
+            .map_err(|err| format!("failed to emit session metadata: {err}"))?;
+    }
 
     let out_log = log_file.as_ref().map(Arc::clone);
     let out_terminal = Arc::clone(&terminal_lock);
@@ -1366,6 +1460,13 @@ fn load_demo_manifest(example_dir: &Path) -> Result<DemoManifest, String> {
         runtime_selection: parse_runtime_selection(&parsed.runtime)?,
         command: parsed.command,
         clean_command: parsed.clean,
+        branding: DemoBranding {
+            product_name: parsed.product_name,
+            product_tagline: parsed.product_tagline,
+            sponsor_name: parsed.sponsor_name,
+            sponsor_message: parsed.sponsor_message,
+            sponsor_url: parsed.sponsor_url,
+        },
     })
 }
 
@@ -1455,6 +1556,8 @@ fn run_demo(demo_args: DemoArgs) -> Result<i32, String> {
         .unwrap_or_else(|| DEFAULT_EXAMPLE_NAME.to_string());
     let example_dir = resolve_example_dir(&repo_root, &example_name)?;
     let manifest = load_demo_manifest(&example_dir)?;
+    let session_record = manifest.branding.session_record(&example_name);
+    let extra_env = manifest.branding.extra_env(&example_name);
 
     eprintln!("Running example: {example_name}");
     clean_example(&example_dir, manifest.clean_command.as_deref())?;
@@ -1463,12 +1566,14 @@ fn run_demo(demo_args: DemoArgs) -> Result<i32, String> {
         CliArgs {
             probe_file: None,
             config_path: Some(PathBuf::from(DEFAULT_CONFIG_FILE_NAME)),
-            log_enable: false,
+            log_enable: demo_args.log_enable,
             emit_mode: demo_args.emit_mode,
             transport_mode: demo_args.transport_mode,
             runtime_selection: manifest.runtime_selection,
             dashboard: DashboardOptions::default(),
             command: manifest.command,
+            session_record,
+            extra_env,
         },
         example_dir,
     )
@@ -1507,6 +1612,7 @@ fn run_cli(cli_args: CliArgs, project_dir: PathBuf) -> Result<i32, String> {
             &project_dir,
             cli_args.log_enable,
             cli_args.transport_mode,
+            cli_args.session_record.as_ref(),
         )
     } else if cli_args.log_enable {
         run_with_log(command, &project_dir)
@@ -1712,6 +1818,42 @@ mod tests {
             vec!["npm".to_string(), "run".to_string(), "generate".to_string()]
         );
         assert!(manifest.clean_command.is_none());
+        assert!(manifest.branding.is_empty());
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn demo_manifest_parses_branding_metadata() {
+        let temp_dir = unique_temp_dir("ebpf-demo-branding");
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        fs::write(
+            temp_dir.join("ebpf-demo.toml"),
+            concat!(
+                "runtime = \"rust\"\n",
+                "command = [\"cargo\", \"run\"]\n",
+                "product_name = \"eBPF_tracker\"\n",
+                "product_tagline = \"Trace the full command session\"\n",
+                "sponsor_name = \"cargo-ebpf-tracker\"\n",
+                "sponsor_message = \"Replayable syscall demos\"\n",
+                "sponsor_url = \"https://github.com/givtaj/cargo-ebpf-tracker\"\n"
+            ),
+        )
+        .expect("manifest should be written");
+
+        let manifest = load_demo_manifest(&temp_dir).expect("manifest should load");
+        assert_eq!(
+            manifest.branding.product_name.as_deref(),
+            Some("eBPF_tracker")
+        );
+        assert_eq!(
+            manifest.branding.product_tagline.as_deref(),
+            Some("Trace the full command session")
+        );
+        assert_eq!(
+            manifest.branding.sponsor_name.as_deref(),
+            Some("cargo-ebpf-tracker")
+        );
 
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -1803,6 +1945,7 @@ mod tests {
     fn demo_args_parse_dashboard_options() {
         let parsed = parse_args(vec![
             "demo".to_string(),
+            "--log-enable".to_string(),
             "--dashboard".to_string(),
             "--dashboard-port".to_string(),
             "44001".to_string(),
@@ -1812,6 +1955,7 @@ mod tests {
 
         match parsed {
             ParseOutcome::Demo(demo_args) => {
+                assert!(demo_args.log_enable);
                 assert_eq!(
                     demo_args.dashboard,
                     DashboardOptions {
@@ -1838,6 +1982,8 @@ mod tests {
                 port: DEFAULT_DASHBOARD_PORT,
             },
             command: vec!["npm".to_string(), "test".to_string()],
+            session_record: None,
+            extra_env: Vec::new(),
         });
 
         assert_eq!(
@@ -1866,6 +2012,7 @@ mod tests {
         let args = build_demo_args_for_dashboard(&super::DemoArgs {
             example_name: Some("session-io-demo".to_string()),
             list_examples: false,
+            log_enable: false,
             emit_mode: EmitMode::Raw,
             transport_mode: TransportMode::Perf,
             dashboard: DashboardOptions {
@@ -1878,6 +2025,7 @@ mod tests {
             args,
             vec![
                 "demo",
+                "--log-enable",
                 "--emit",
                 "jsonl",
                 "--transport",

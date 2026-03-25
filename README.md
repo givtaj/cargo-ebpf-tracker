@@ -86,9 +86,10 @@ eBPF_tracker npm test
 
 That installs the `eBPF_tracker` binary only.
 
-Repo-local helpers such as `cargo demo`, `cargo otel`, and `cargo jaeger` are
-workspace aliases for contributors or people running from a local clone of this
-repository. They are not installed as standalone commands by `cargo install`.
+Repo-local helpers such as `cargo demo`, `cargo otel`, `cargo jaeger`, and
+`cargo viewer` are workspace aliases for contributors or people running from a
+local clone of this repository. They are not installed as standalone commands
+by `cargo install`.
 
 Runtime assets are materialized under `~/.cache/ebpf-tracker` by default.
 
@@ -135,8 +136,19 @@ Live dashboard from a local clone:
 ```
 
 `--dashboard` launches the repo-local viewer in your browser and forces the
-tracker stream to `--emit jsonl` for that run. Use `--dashboard-port 43116` if
-you need a different local port.
+tracker stream to `--emit jsonl` for that run. Dashboard mode also enables
+`--log-enable` so each traced session leaves a replayable log under `./logs`.
+Use `--dashboard-port 43116` if you need a different local port.
+
+The replay deck is meant to work like trace-analysis software: stored sessions
+can be restarted, paused, stepped, moved backward, or moved forward while the
+viewer rebuilds the syscall state from the log.
+
+Replay a stored session:
+
+```bash
+cargo viewer -- --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
+```
 
 Built-in probe by name:
 
@@ -236,6 +248,7 @@ If you have cloned this repository, the workspace also includes:
 - `cargo demo`: repo-local example runner
 - `cargo otel`: repo-local OTLP exporter for the JSONL stream
 - `cargo jaeger`: repo-local Jaeger helper commands
+- `cargo viewer`: repo-local dashboard and replay viewer crate
 
 OTLP example from a local clone:
 
@@ -276,6 +289,12 @@ If you have cloned this repository, the first example worth running is
 All examples are indexed in
 [`examples/README.md`](./examples/README.md), including the Cargo-based way to
 run them.
+
+Each example is declared by an `ebpf-demo.toml` manifest under `examples/`.
+That manifest selects the runtime (`rust` or `node`), the traced command, and
+an optional clean step that runs before the example starts. It can also carry
+demo branding metadata such as product and sponsor fields; those are emitted as
+typed JSONL session records, stored in replay logs, and shown by the viewer.
 
 It shows why session-based tracing is useful:
 
@@ -368,7 +387,7 @@ Expected today:
 
 - Add process-tree-only and target-only filtering so the stream can focus on the app and its children instead of the whole wrapped session
 - Add stable stream profiles like `minimal`, `default`, and `full`
-- Add a separate viewer crate that reads JSONL from `stdin` and renders a first trace-focused TUI on top of the stream
+- Extend `crates/ebpf-tracker-viewer` so it can read JSONL from `stdin` and grow from the current dashboard into a first trace-focused TUI
 - Improve the OTel mapping with parent/child process relationships and better span/event semantics for Jaeger and other collectors
 - Add direct perf-event-array or ringbuf transport after the event model and stream UX are stable
 - Add regression coverage for JSONL mode when Docker, `perf`, or wrapped commands emit non-UTF-8 bytes on `stderr`
@@ -382,8 +401,8 @@ This repo stays as one workspace, but the boundaries are now explicit:
 - `crates/ebpf-tracker-events` owns the event parsing and JSONL stream schema
 - `crates/ebpf-tracker-otel` maps the JSONL stream into OTLP traces and can manage a local Jaeger collector
 - `crates/ebpf-tracker-perf` normalizes Linux `perf trace` output today and holds the future perf-event-array/ringbuf work
-- future viewers or other consumers should be added as separate crates under
-  `crates/`
+- `crates/ebpf-tracker-viewer` owns the live matrix dashboard and replay viewer extension
+- future viewers or other consumers should still be added as separate crates under `crates/`
 - `examples/` stays reserved for runnable demo apps, not product code
 
 That keeps the core Unix contract clear: `eBPF_tracker` emits events, and other
@@ -397,6 +416,7 @@ tools decide how to render, store, or forward them.
 - `crates/ebpf-tracker-events`: shared event schema and JSONL parsing crate
 - `crates/ebpf-tracker-otel`: OTLP exporter plus local Jaeger helper commands
 - `crates/ebpf-tracker-perf`: `perf trace` normalization plus future perf/ringbuf transport work
+- `crates/ebpf-tracker-viewer`: dashboard and replay viewer extension crate
 - `ebpf-tracker.toml.example`: example config
 - `docker-compose.bpftrace.yml`: runtime definition
 - `docker/bpftrace-rust.Dockerfile`: runtime image

@@ -2,6 +2,18 @@
 
 This example mirrors the Rust postcard demo with plain Node.js so you can trace
 the same visible workflow in a separate runtime.
+Like the Rust version, the generated HTML, SVG, and summary JSON carry the
+demo's product and sponsor branding so the visible artifact still advertises
+the product after the trace is over.
+
+Manifest for this example:
+
+```toml
+runtime = "node"
+command = ["npm", "run", "generate"]
+product_name = "eBPF_tracker"
+product_tagline = "Trace the full command session, then replay it."
+```
 
 What it does:
 

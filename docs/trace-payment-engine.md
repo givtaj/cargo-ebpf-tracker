@@ -147,6 +147,8 @@ in one trace session.
 ## Notes
 
 - If you want a full machine-readable trace, keep `trace.jsonl`.
+- You can replay that stored trace with the viewer crate via
+  `cargo viewer -- --replay trace.jsonl`.
 - If you want the business output only, run the payment engine once without
   tracing.
 - The current product still traces the whole command session, so filtering is

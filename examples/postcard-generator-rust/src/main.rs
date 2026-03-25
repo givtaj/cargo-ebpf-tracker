@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -9,6 +10,7 @@ fn main() {
     let title = read_trimmed("input/title.txt");
     let message = read_trimmed("input/message.txt");
     let palette = read_palette("input/palette.txt");
+    let branding = load_demo_branding();
     let template = fs::read_to_string("templates/postcard.html.tpl")
         .expect("failed to read templates/postcard.html.tpl");
     let generated_at = run_command("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"]);
@@ -16,10 +18,18 @@ fn main() {
 
     fs::create_dir_all("dist").expect("failed to create dist");
 
-    let svg = render_svg(&title, &message, &palette, &server_reply, &generated_at);
+    let svg = render_svg(
+        &title,
+        &message,
+        &palette,
+        &server_reply,
+        &generated_at,
+        &branding,
+    );
     fs::write("dist/postcard.svg", svg).expect("failed to write dist/postcard.svg");
 
-    let summary_json = render_summary_json(&title, &message, &generated_at, &server_reply);
+    let summary_json =
+        render_summary_json(&title, &message, &generated_at, &server_reply, &branding);
     fs::write("dist/summary.json", &summary_json).expect("failed to write dist/summary.json");
 
     let html = render_html(
@@ -30,6 +40,7 @@ fn main() {
         &server_reply,
         &summary_json,
         &palette,
+        &branding,
     );
     fs::write("dist/postcard.html", html).expect("failed to write dist/postcard.html");
 
@@ -67,6 +78,29 @@ fn palette_value<'a>(palette: &'a BTreeMap<String, String>, key: &str) -> &'a st
         .get(key)
         .map(String::as_str)
         .unwrap_or_else(|| panic!("missing palette key: {key}"))
+}
+
+struct DemoBranding {
+    product_name: String,
+    product_tagline: String,
+    sponsor_name: String,
+    sponsor_message: String,
+    sponsor_url: String,
+}
+
+fn load_demo_branding() -> DemoBranding {
+    DemoBranding {
+        product_name: env::var("EBPF_TRACKER_DEMO_PRODUCT_NAME")
+            .unwrap_or_else(|_| "eBPF_tracker".to_string()),
+        product_tagline: env::var("EBPF_TRACKER_DEMO_PRODUCT_TAGLINE")
+            .unwrap_or_else(|_| "Trace the full command session, then replay it.".to_string()),
+        sponsor_name: env::var("EBPF_TRACKER_DEMO_SPONSOR_NAME")
+            .unwrap_or_else(|_| "cargo-ebpf-tracker".to_string()),
+        sponsor_message: env::var("EBPF_TRACKER_DEMO_SPONSOR_MESSAGE")
+            .unwrap_or_else(|_| "Replayable syscall demos for Rust and Node.".to_string()),
+        sponsor_url: env::var("EBPF_TRACKER_DEMO_SPONSOR_URL")
+            .unwrap_or_else(|_| "https://github.com/givtaj/cargo-ebpf-tracker".to_string()),
+    }
 }
 
 fn run_command(program: &str, args: &[&str]) -> String {
@@ -121,6 +155,7 @@ fn render_svg(
     palette: &BTreeMap<String, String>,
     server_reply: &str,
     generated_at: &str,
+    branding: &DemoBranding,
 ) -> String {
     let paper = palette_value(palette, "paper");
     let ink = palette_value(palette, "ink");
@@ -129,6 +164,8 @@ fn render_svg(
     let shadow = palette_value(palette, "shadow");
     let short_reply = truncate(server_reply, 48);
     let short_message = truncate(message, 96);
+    let product_name = truncate(&branding.product_name, 24);
+    let sponsor_name = truncate(&branding.sponsor_name, 24);
 
     format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" role="img" aria-labelledby="title desc">
@@ -161,6 +198,8 @@ fn render_svg(
   <text x="650" y="334" fill="{}" font-family="Georgia, serif" font-size="28">Visual Debugger</text>
   <text x="650" y="372" fill="{}" font-family="Georgia, serif" font-size="22">127 Trace Street</text>
   <text x="650" y="406" fill="{}" font-family="Georgia, serif" font-size="22">Docker City, LN</text>
+  <text x="650" y="454" fill="{}" font-family="'Courier New', monospace" font-size="14">Powered by {}</text>
+  <text x="650" y="478" fill="{}" font-family="'Courier New', monospace" font-size="12">{}</text>
 </svg>
 "##,
         xml_escape(title),
@@ -190,7 +229,11 @@ fn render_svg(
         accent,
         ink,
         ink,
-        ink
+        ink,
+        accent,
+        xml_escape(product_name.as_str()),
+        shadow,
+        xml_escape(sponsor_name.as_str())
     )
 }
 
@@ -202,6 +245,7 @@ fn render_html(
     server_reply: &str,
     summary_json: &str,
     palette: &BTreeMap<String, String>,
+    branding: &DemoBranding,
 ) -> String {
     let replacements = [
         ("{{title}}", html_escape(title)),
@@ -214,6 +258,16 @@ fn render_html(
         ("{{accent}}", palette_value(palette, "accent").to_string()),
         ("{{stamp}}", palette_value(palette, "stamp").to_string()),
         ("{{shadow}}", palette_value(palette, "shadow").to_string()),
+        ("{{product_name}}", html_escape(&branding.product_name)),
+        (
+            "{{product_tagline}}",
+            html_escape(&branding.product_tagline),
+        ),
+        ("{{sponsor_name}}", html_escape(&branding.sponsor_name)),
+        (
+            "{{sponsor_message}}",
+            html_escape(&branding.sponsor_message),
+        ),
     ];
 
     let mut output = template.to_string();
@@ -228,6 +282,7 @@ fn render_summary_json(
     message: &str,
     generated_at: &str,
     server_reply: &str,
+    branding: &DemoBranding,
 ) -> String {
     format!(
         concat!(
@@ -235,13 +290,23 @@ fn render_summary_json(
             "  \"title\": \"{}\",\n",
             "  \"message\": \"{}\",\n",
             "  \"generated_at\": \"{}\",\n",
-            "  \"server_reply\": \"{}\"\n",
+            "  \"server_reply\": \"{}\",\n",
+            "  \"product_name\": \"{}\",\n",
+            "  \"product_tagline\": \"{}\",\n",
+            "  \"sponsor_name\": \"{}\",\n",
+            "  \"sponsor_message\": \"{}\",\n",
+            "  \"sponsor_url\": \"{}\"\n",
             "}}\n"
         ),
         json_escape(title),
         json_escape(message),
         json_escape(generated_at),
-        json_escape(server_reply)
+        json_escape(server_reply),
+        json_escape(&branding.product_name),
+        json_escape(&branding.product_tagline),
+        json_escape(&branding.sponsor_name),
+        json_escape(&branding.sponsor_message),
+        json_escape(&branding.sponsor_url)
     )
 }
 
