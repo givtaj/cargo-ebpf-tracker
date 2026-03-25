@@ -121,6 +121,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ebpf-tracker-dataset"
+version = "0.1.0"
+dependencies = [
+ "ebpf-tracker-events",
+ "reqwest",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ebpf-tracker-events"
 version = "0.1.0"
 dependencies = [

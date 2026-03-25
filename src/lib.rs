@@ -257,6 +257,7 @@ fn print_usage() {
         "Usage: eBPF_tracker [--probe <file-or-name>] [--config <path>] [--log-enable] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--runtime <auto|rust|node>] [--dashboard] [--dashboard-port <port>] <command> [args...]"
     );
     eprintln!("Usage: eBPF_tracker demo [--list] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--dashboard] [--dashboard-port <port>] [example-name]");
+    eprintln!("Usage: eBPF_tracker see [--port <port>] [example-name]");
     eprintln!("Default emit mode: raw");
     eprintln!("Default transport: bpftrace");
     eprintln!("Default runtime: auto");
@@ -272,8 +273,11 @@ fn print_usage() {
     eprintln!("Example: eBPF_tracker --runtime node /bin/sh -lc \"npm run dev\"");
     eprintln!("Example: eBPF_tracker --dashboard cargo run");
     eprintln!("Example: eBPF_tracker demo --dashboard session-io-demo");
+    eprintln!("Example: eBPF_tracker see");
+    eprintln!("Example: eBPF_tracker see postcard-generator-rust");
     eprintln!("Repository demo mode: eBPF_tracker demo --list");
     eprintln!("Repository demo example: eBPF_tracker demo --emit jsonl session-io-demo");
+    eprintln!("The see subcommand is a shortcut for the dashboard demo experience.");
     eprintln!("The demo subcommand expects a local clone of cargo-ebpf-tracker.");
 }
 
@@ -316,6 +320,9 @@ fn parse_dashboard_port(raw_port: &str) -> Result<u16, String> {
 fn parse_args(args: Vec<String>) -> Result<ParseOutcome, String> {
     if matches!(args.first().map(String::as_str), Some("demo")) {
         return parse_demo_args(&args[1..]);
+    }
+    if matches!(args.first().map(String::as_str), Some("see")) {
+        return parse_see_args(&args[1..]);
     }
 
     let mut probe_file = None;
@@ -541,6 +548,60 @@ fn parse_demo_args(args: &[String]) -> Result<ParseOutcome, String> {
         log_enable,
         emit_mode,
         transport_mode,
+        dashboard,
+    }))
+}
+
+fn parse_see_args(args: &[String]) -> Result<ParseOutcome, String> {
+    let mut example_name = None;
+    let mut dashboard = DashboardOptions {
+        enabled: true,
+        port: DEFAULT_DASHBOARD_PORT,
+    };
+    let mut index = 0usize;
+
+    while index < args.len() {
+        let arg = &args[index];
+        match arg.as_str() {
+            "-h" | "--help" => return Ok(ParseOutcome::Help),
+            "--port" | "--dashboard-port" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| format!("missing value for {arg}"))?;
+                dashboard.port = parse_dashboard_port(value)?;
+                index += 2;
+            }
+            _ if arg.starts_with("--port=") => {
+                let value = arg.trim_start_matches("--port=");
+                if value.is_empty() {
+                    return Err("missing value for --port".to_string());
+                }
+                dashboard.port = parse_dashboard_port(value)?;
+                index += 1;
+            }
+            _ if arg.starts_with("--dashboard-port=") => {
+                let value = arg.trim_start_matches("--dashboard-port=");
+                if value.is_empty() {
+                    return Err("missing value for --dashboard-port".to_string());
+                }
+                dashboard.port = parse_dashboard_port(value)?;
+                index += 1;
+            }
+            _ if arg.starts_with('-') => return Err(format!("unknown see flag: {arg}")),
+            _ if example_name.is_none() => {
+                example_name = Some(arg.clone());
+                index += 1;
+            }
+            _ => return Err("see accepts at most one example name".to_string()),
+        }
+    }
+
+    Ok(ParseOutcome::Demo(DemoArgs {
+        example_name,
+        list_examples: false,
+        log_enable: true,
+        emit_mode: EmitMode::Jsonl,
+        transport_mode: TransportMode::Bpftrace,
         dashboard,
     }))
 }
@@ -1079,6 +1140,14 @@ fn append_log_bytes(log_file: &Arc<Mutex<File>>, bytes: &[u8]) -> io::Result<()>
     Ok(())
 }
 
+fn append_stream_record(log_file: &Arc<Mutex<File>>, record: &StreamRecord) -> io::Result<()> {
+    let serialized =
+        serde_json::to_string(record).map_err(|err| io::Error::other(err.to_string()))?;
+    append_log_bytes(log_file, serialized.as_bytes())?;
+    append_log_bytes(log_file, b"\n")?;
+    Ok(())
+}
+
 fn trim_line_endings(bytes: &[u8]) -> &[u8] {
     let mut end = bytes.len();
     while end > 0 && matches!(bytes[end - 1], b'\n' | b'\r') {
@@ -1117,16 +1186,18 @@ fn process_jsonl_line_bytes(
     transport_mode: TransportMode,
     summary: &mut JsonlCopySummary,
 ) -> io::Result<()> {
-    if let Some(log_file) = log_file {
-        append_log_bytes(log_file, line_bytes)?;
-    }
-
     if let Some(record) = stream_record_for_bytes(line_bytes, transport_mode) {
+        if let Some(log_file) = log_file {
+            append_stream_record(log_file, &record)?;
+        }
         if transport_mode == TransportMode::Perf {
             summary.perf_session.observe(&record);
         }
         emit_stream_record(&record, terminal_lock)?;
     } else {
+        if let Some(log_file) = log_file {
+            append_log_bytes(log_file, line_bytes)?;
+        }
         forward_passthrough_bytes(line_bytes, terminal_lock)?;
     }
 
@@ -1961,6 +2032,55 @@ mod tests {
                     DashboardOptions {
                         enabled: true,
                         port: 44001
+                    }
+                );
+            }
+            _ => panic!("expected demo outcome"),
+        }
+    }
+
+    #[test]
+    fn see_args_use_dashboard_demo_defaults() {
+        let parsed = parse_args(vec!["see".to_string()]).expect("args should parse");
+
+        match parsed {
+            ParseOutcome::Demo(demo_args) => {
+                assert_eq!(demo_args.example_name, None);
+                assert!(demo_args.log_enable);
+                assert_eq!(demo_args.emit_mode, EmitMode::Jsonl);
+                assert_eq!(demo_args.transport_mode, TransportMode::Bpftrace);
+                assert_eq!(
+                    demo_args.dashboard,
+                    DashboardOptions {
+                        enabled: true,
+                        port: DEFAULT_DASHBOARD_PORT
+                    }
+                );
+            }
+            _ => panic!("expected demo outcome"),
+        }
+    }
+
+    #[test]
+    fn see_args_accept_example_name_and_port_alias() {
+        let parsed = parse_args(vec![
+            "see".to_string(),
+            "--port=44002".to_string(),
+            "postcard-generator-rust".to_string(),
+        ])
+        .expect("args should parse");
+
+        match parsed {
+            ParseOutcome::Demo(demo_args) => {
+                assert_eq!(
+                    demo_args.example_name,
+                    Some("postcard-generator-rust".to_string())
+                );
+                assert_eq!(
+                    demo_args.dashboard,
+                    DashboardOptions {
+                        enabled: true,
+                        port: 44002
                     }
                 );
             }

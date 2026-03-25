@@ -86,10 +86,10 @@ eBPF_tracker npm test
 
 That installs the `eBPF_tracker` binary only.
 
-Repo-local helpers such as `cargo demo`, `cargo otel`, `cargo jaeger`, and
-`cargo viewer` are workspace aliases for contributors or people running from a
-local clone of this repository. They are not installed as standalone commands
-by `cargo install`.
+Repo-local helpers such as `cargo demo`, `cargo dataset`, `cargo otel`,
+`cargo jaeger`, and `cargo viewer` are workspace aliases for contributors or
+people running from a local clone of this repository. They are not installed as
+standalone commands by `cargo install`.
 
 Runtime assets are materialized under `~/.cache/ebpf-tracker` by default.
 
@@ -135,6 +135,17 @@ Live dashboard from a local clone:
 ./target/debug/eBPF_tracker demo --dashboard session-io-demo
 ```
 
+Shortest product demo from a local clone:
+
+```bash
+./target/debug/eBPF_tracker see
+cargo see
+```
+
+That is a shortcut for opening the default dashboard demo experience. You can
+also target a specific example with `./target/debug/eBPF_tracker see
+postcard-generator-rust` or `cargo see postcard-generator-rust`.
+
 `--dashboard` launches the repo-local viewer in your browser and forces the
 tracker stream to `--emit jsonl` for that run. Dashboard mode also enables
 `--log-enable` so each traced session leaves a replayable log under `./logs`.
@@ -179,6 +190,16 @@ In `jsonl` mode:
 
 That makes it easy to pipe the trace stream into another tool that renders a UI,
 stores the events, or applies custom filtering.
+
+Local dataset bundle example from a clone:
+
+```bash
+eBPF_tracker --emit jsonl cargo run | cargo dataset --test-name cargo-run-smoke
+```
+
+That writes one dataset bundle per run under `./datasets/`, including canonical
+`events.jsonl`, per-process summaries, aggregate metrics, and derived features
+such as the focus process and top files.
 
 The JSONL event contract now lives in the shared workspace crate
 `crates/ebpf-tracker-events`, so future consumers can reuse the same parsing and
@@ -246,9 +267,34 @@ see [Trace `givtaj/payment-engine`](./docs/trace-payment-engine.md).
 If you have cloned this repository, the workspace also includes:
 
 - `cargo demo`: repo-local example runner
+- `cargo dataset`: repo-local dataset writer for JSONL streams and replay logs
 - `cargo otel`: repo-local OTLP exporter for the JSONL stream
 - `cargo jaeger`: repo-local Jaeger helper commands
 - `cargo viewer`: repo-local dashboard and replay viewer crate
+
+Dataset example from a local clone:
+
+```bash
+cargo demo --emit jsonl session-io-demo | cargo dataset --test-name session-io-demo
+```
+
+Replay-log dataset example:
+
+```bash
+cargo dataset --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
+```
+
+LM Studio analysis example:
+
+```bash
+cargo dataset analyze --run datasets/<run-id> --provider lm-studio --model qwen/qwen3.5-9b
+```
+
+That uses LM Studio's local OpenAI-compatible API by default at
+`http://127.0.0.1:1234/v1` and writes the model output under the run's
+`analysis/` directory. If you switch to a different local or remote
+OpenAI-compatible backend later, keep the same command and swap `--provider`,
+`--endpoint`, and `--model`.
 
 OTLP example from a local clone:
 
@@ -318,6 +364,7 @@ cargo build --bin eBPF_tracker
 ```
 
 That starts the demo trace and opens the live dashboard automatically.
+The shorter equivalent is `./target/debug/eBPF_tracker see`.
 You can also run the repo-built binary from outside the repo, for example
 `/path/to/cargo-ebpf-tracker/target/debug/eBPF_tracker demo session-io-demo`.
 
@@ -400,6 +447,8 @@ This repo stays as one workspace, but the boundaries are now explicit:
 - the root package is the installable CLI that runs Docker + `bpftrace`
 - `crates/ebpf-tracker-events` owns the event parsing and JSONL stream schema
 - `crates/ebpf-tracker-otel` maps the JSONL stream into OTLP traces and can manage a local Jaeger collector
+- `crates/ebpf-tracker-dataset` turns JSONL streams or replay logs into per-run dataset bundles
+- `crates/ebpf-tracker-dataset` also ships a provider-adapter based analyzer for local or remote OpenAI-compatible models
 - `crates/ebpf-tracker-perf` normalizes Linux `perf trace` output today and holds the future perf-event-array/ringbuf work
 - `crates/ebpf-tracker-viewer` owns the live matrix dashboard and replay viewer extension
 - future viewers or other consumers should still be added as separate crates under `crates/`
@@ -414,6 +463,7 @@ tools decide how to render, store, or forward them.
 - `src/lib.rs`: installable CLI logic
 - `src/main.rs`: thin binary wrapper for the CLI crate
 - `crates/ebpf-tracker-events`: shared event schema and JSONL parsing crate
+- `crates/ebpf-tracker-dataset`: local dataset writer for runs and replay logs
 - `crates/ebpf-tracker-otel`: OTLP exporter plus local Jaeger helper commands
 - `crates/ebpf-tracker-perf`: `perf trace` normalization plus future perf/ringbuf transport work
 - `crates/ebpf-tracker-viewer`: dashboard and replay viewer extension crate

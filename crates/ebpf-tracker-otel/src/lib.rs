@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io::BufRead;
@@ -6,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::Duration;
 
-use ebpf_tracker_events::{EventKind, StreamRecord};
+use ebpf_tracker_events::{SessionTrace, StreamRecord};
 use opentelemetry_proto::tonic::collector::trace::v1::{
     ExportTracePartialSuccess, ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
@@ -31,6 +30,8 @@ pub const DEFAULT_SERVICE_NAME: &str = "ebpf-tracker";
 pub const DEFAULT_JAEGER_OTLP_HTTP_ENDPOINT: &str = "http://127.0.0.1:4318/v1/traces";
 pub const DEFAULT_OTLP_HTTP_ENDPOINT: &str = "http://127.0.0.1:4318/v1/traces";
 pub const DEFAULT_JAEGER_UI_URL: &str = "http://127.0.0.1:16686";
+
+pub use ebpf_tracker_events::{build_session_trace, AggregateMetric, ProcessTrace, SyscallEvent};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CollectorTarget {
@@ -71,62 +72,6 @@ pub struct StreamSummary {
     pub collector_warnings: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SessionTrace {
-    pub started_unix_ms: u64,
-    pub finished_unix_ms: u64,
-    pub total_records: usize,
-    pub syscall_records: usize,
-    pub aggregate_records: usize,
-    pub processes: Vec<ProcessTrace>,
-    pub aggregates: Vec<AggregateMetric>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProcessTrace {
-    pub comm: String,
-    pub pid: u32,
-    pub started_unix_ms: u64,
-    pub finished_unix_ms: u64,
-    pub syscall_count: usize,
-    pub writes: usize,
-    pub opens: usize,
-    pub connects: usize,
-    pub execs: usize,
-    pub bytes_written: u64,
-    pub events: Vec<SyscallEvent>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SyscallEvent {
-    pub timestamp_unix_ms: u64,
-    pub kind: EventKind,
-    pub file: Option<String>,
-    pub bytes: Option<u64>,
-    pub fd: Option<i32>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AggregateMetric {
-    pub timestamp_unix_ms: u64,
-    pub metric: String,
-    pub value: u64,
-}
-
-#[derive(Debug)]
-struct ProcessAccumulator {
-    comm: String,
-    pid: u32,
-    started_unix_ms: u64,
-    finished_unix_ms: u64,
-    writes: usize,
-    opens: usize,
-    connects: usize,
-    execs: usize,
-    bytes_written: u64,
-    events: Vec<SyscallEvent>,
-}
-
 #[derive(Clone, Debug)]
 struct ValidatedExportConfig {
     target: CollectorTarget,
@@ -164,21 +109,6 @@ impl Default for ExportConfig {
     }
 }
 
-impl SessionTrace {
-    pub fn summary(&self) -> StreamSummary {
-        let session_span = usize::from(self.total_records > 0);
-        StreamSummary {
-            total_records: self.total_records,
-            syscall_records: self.syscall_records,
-            aggregate_records: self.aggregate_records,
-            process_spans: self.processes.len(),
-            exported_spans: self.processes.len() + session_span,
-            span_events: self.syscall_records + self.aggregate_records,
-            collector_warnings: Vec::new(),
-        }
-    }
-}
-
 pub fn parse_target(raw: &str) -> Result<CollectorTarget, String> {
     match raw {
         "otlp" => Ok(CollectorTarget::Otlp),
@@ -204,119 +134,16 @@ pub fn read_stream_records<R: BufRead>(reader: R) -> Result<Vec<StreamRecord>, S
     Ok(records)
 }
 
-pub fn build_session_trace(records: &[StreamRecord]) -> SessionTrace {
-    if records.is_empty() {
-        return SessionTrace::default();
-    }
-
-    let mut started_unix_ms = u64::MAX;
-    let mut finished_unix_ms = 0u64;
-    let mut syscall_records = 0usize;
-    let mut aggregate_records = 0usize;
-    let mut processes: BTreeMap<(u32, String), ProcessAccumulator> = BTreeMap::new();
-    let mut aggregates = Vec::new();
-
-    for record in records {
-        match record {
-            StreamRecord::Session {
-                timestamp_unix_ms, ..
-            } => {
-                started_unix_ms = started_unix_ms.min(*timestamp_unix_ms);
-                finished_unix_ms = finished_unix_ms.max(*timestamp_unix_ms);
-            }
-            StreamRecord::Syscall {
-                timestamp_unix_ms,
-                kind,
-                comm,
-                pid,
-                file,
-                bytes,
-                fd,
-            } => {
-                started_unix_ms = started_unix_ms.min(*timestamp_unix_ms);
-                finished_unix_ms = finished_unix_ms.max(*timestamp_unix_ms);
-                syscall_records += 1;
-
-                let key = (*pid, comm.clone());
-                let entry = processes.entry(key).or_insert_with(|| ProcessAccumulator {
-                    comm: comm.clone(),
-                    pid: *pid,
-                    started_unix_ms: *timestamp_unix_ms,
-                    finished_unix_ms: *timestamp_unix_ms,
-                    writes: 0,
-                    opens: 0,
-                    connects: 0,
-                    execs: 0,
-                    bytes_written: 0,
-                    events: Vec::new(),
-                });
-
-                entry.started_unix_ms = entry.started_unix_ms.min(*timestamp_unix_ms);
-                entry.finished_unix_ms = entry.finished_unix_ms.max(*timestamp_unix_ms);
-
-                match kind {
-                    EventKind::Execve => entry.execs += 1,
-                    EventKind::OpenAt => entry.opens += 1,
-                    EventKind::Write => {
-                        entry.writes += 1;
-                        entry.bytes_written = entry
-                            .bytes_written
-                            .saturating_add(bytes.unwrap_or_default());
-                    }
-                    EventKind::Connect => entry.connects += 1,
-                }
-
-                entry.events.push(SyscallEvent {
-                    timestamp_unix_ms: *timestamp_unix_ms,
-                    kind: *kind,
-                    file: file.clone(),
-                    bytes: *bytes,
-                    fd: *fd,
-                });
-            }
-            StreamRecord::Aggregate {
-                timestamp_unix_ms,
-                metric,
-                value,
-            } => {
-                started_unix_ms = started_unix_ms.min(*timestamp_unix_ms);
-                finished_unix_ms = finished_unix_ms.max(*timestamp_unix_ms);
-                aggregate_records += 1;
-                aggregates.push(AggregateMetric {
-                    timestamp_unix_ms: *timestamp_unix_ms,
-                    metric: metric.clone(),
-                    value: *value,
-                });
-            }
-        }
-    }
-
-    let mut process_traces: Vec<ProcessTrace> = processes
-        .into_values()
-        .map(|process| ProcessTrace {
-            comm: process.comm,
-            pid: process.pid,
-            started_unix_ms: process.started_unix_ms,
-            finished_unix_ms: process.finished_unix_ms,
-            syscall_count: process.events.len(),
-            writes: process.writes,
-            opens: process.opens,
-            connects: process.connects,
-            execs: process.execs,
-            bytes_written: process.bytes_written,
-            events: process.events,
-        })
-        .collect();
-    process_traces.sort_by_key(|process| (process.started_unix_ms, process.pid));
-
-    SessionTrace {
-        started_unix_ms,
-        finished_unix_ms,
-        total_records: records.len(),
-        syscall_records,
-        aggregate_records,
-        processes: process_traces,
-        aggregates,
+pub fn summarize_trace(trace: &SessionTrace) -> StreamSummary {
+    let session_span = usize::from(trace.total_records > 0);
+    StreamSummary {
+        total_records: trace.total_records,
+        syscall_records: trace.syscall_records,
+        aggregate_records: trace.aggregate_records,
+        process_spans: trace.processes.len(),
+        exported_spans: trace.processes.len() + session_span,
+        span_events: trace.syscall_records + trace.aggregate_records,
+        collector_warnings: Vec::new(),
     }
 }
 
@@ -331,7 +158,7 @@ pub fn export_records(
 ) -> Result<StreamSummary, String> {
     let validated = validate_export_config(config)?;
     let trace = build_session_trace(records);
-    let mut summary = trace.summary();
+    let mut summary = summarize_trace(&trace);
 
     if trace.total_records == 0 {
         return Ok(summary);

@@ -957,7 +957,33 @@ function shortPath(file) {
 }
 
 function isInterestingFile(file) {
-  return !isInfraPath(file);
+  return !isInfraFilePath(file);
+}
+
+function isInfraFilePath(file) {
+  const path = String(file || "").toLowerCase();
+  return (
+    path.startsWith("/usr") ||
+    path.startsWith("/lib") ||
+    path.startsWith("/etc") ||
+    path.startsWith("/proc") ||
+    path.startsWith("/sys") ||
+    path.startsWith("/dev") ||
+    path.startsWith("/var/lib/desktop-containerd") ||
+    path.startsWith("/var/lib/containerd") ||
+    path.startsWith("/var/run/docker") ||
+    path.startsWith("/run/containerd") ||
+    path.startsWith("/run/desktop-containerd") ||
+    path.includes("/daemon/io.containerd") ||
+    path.includes("/cargo-target/") ||
+    path.includes("/rustup/toolchains/") ||
+    path.includes("/usr/local/cargo") ||
+    path.includes("/.cargo/") ||
+    path.includes("/tls/") ||
+    path.includes("/atomics/") ||
+    path.includes(".so") ||
+    isNoiseBasename(path)
+  );
 }
 
 function isNoiseBasename(file) {
@@ -965,6 +991,9 @@ function isNoiseBasename(file) {
   return (
     base === "ld.so.cache" ||
     base === "locale-archive" ||
+    base === "cargo.lock" ||
+    base === "rust-toolchain" ||
+    base === "rust-toolchain.toml" ||
     /^lib(c|gcc|pthread|m|dl|stdc\+\+)([-._]|$)/.test(base)
   );
 }

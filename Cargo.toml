@@ -13,6 +13,7 @@ categories = ["command-line-utilities", "development-tools"]
 [workspace]
 members = [
     ".",
+    "crates/ebpf-tracker-dataset",
     "crates/ebpf-tracker-events",
     "crates/ebpf-tracker-otel",
     "crates/ebpf-tracker-perf",

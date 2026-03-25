@@ -68,6 +68,18 @@ In that mode, `stdout` is reserved for JSON Lines events, so another app can
 pipe, store, or render the trace stream while `stderr` still shows normal app
 and runtime output.
 
+You can also turn the same run into a reusable dataset bundle:
+
+```bash
+cargo demo --emit jsonl session-io-demo | cargo dataset --test-name session-io-demo
+```
+
+Then analyze the captured run with a local LM Studio model:
+
+```bash
+cargo dataset analyze --run datasets/<run-id> --provider lm-studio --model qwen/qwen3.5-9b
+```
+
 Without `--emit`, the default mode is `raw`.
 Without `--transport`, the default transport is `bpftrace`.
 

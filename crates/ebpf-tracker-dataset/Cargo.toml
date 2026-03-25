@@ -1,0 +1,23 @@
+[package]
+name = "ebpf-tracker-dataset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Local dataset consumer for ebpf-tracker JSONL streams and replay logs"
+publish = false
+
+[lib]
+name = "ebpf_tracker_dataset"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ebpf-tracker-dataset"
+path = "src/main.rs"
+
+[dependencies]
+ebpf-tracker-events = { path = "../ebpf-tracker-events" }
+reqwest = { version = "0.12", features = ["blocking", "json", "rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
