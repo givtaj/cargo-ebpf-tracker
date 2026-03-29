@@ -12,9 +12,11 @@ This file tracks user-requested work and delegated agent tasks in progress on th
 
 ## Active
 
-### Workflow And Project Hygiene
+### Platform Attach And Cloud Targets
 
-- No active task entries right now.
+- 2026-03-25 | Task: Follow up with an `inspektor-gadget` attach backend implementation for Kubernetes and AWS EKS targets | Owner: Codex | Status: planned | Output: pending
+- 2026-03-25 | Task: Follow up with a `tetragon` attach backend implementation for long-running Kubernetes and AWS EKS targets | Owner: Codex | Status: planned | Output: pending
+- 2026-03-25 | Task: Evaluate and scope `aws-ecs` attach support for EC2 launch type after the EKS path is stable | Owner: Codex | Status: planned | Output: pending
 
 ## Completed
 
@@ -41,6 +43,14 @@ This file tracks user-requested work and delegated agent tasks in progress on th
 ### Customer Experience Review
 
 - 2026-03-25 | Task: Review repository from the customer experience standpoint and identify top improvements | Agent: Euclid | Status: completed | Output: `subagents/euclid-customer-experience-review.md`
+
+### Platform Attach And Cloud Targets
+
+- 2026-03-29 | Task: Verify the `attach` scaffold is commit-ready as a standalone topic, including its AWS scope wording and tests | Owner: Codex | Status: completed | Output: attach CLI verification notes, commit-ready verdict: yes
+- 2026-03-29 | Task: Audit the `attach` scaffold/docs for a commit-ready boundary and tighten first-wave AWS scope wording in the scaffold output | Owner: Codex | Status: completed | Output: `src/attach.rs`, `README.md`, `TASKLOG.md`
+- 2026-03-29 | Task: Explicitly document `aws-eks` and `aws-ecs` Fargate limitations for attach mode and keep them out of the first-wave scope | Owner: Codex | Status: completed | Output: `src/attach.rs`, `README.md`, `TASKLOG.md`
+- 2026-03-25 | Task: Scaffold a new `attach` command and backend adapter layer while preserving the existing managed-runtime flow | Owner: Codex | Status: completed | Output: `src/attach.rs`, `src/lib.rs`, `README.md`, `TASKLOG.md`
+- 2026-03-25 | Task: Define and document the first-wave AWS attach target around EKS on EC2 with existing eBPF backends | Owner: Codex | Status: completed | Output: `src/attach.rs`, `src/lib.rs`, `README.md`, `TASKLOG.md`
 
 ### Dataset And Learning Pipeline Exploration
 

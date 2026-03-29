@@ -15,6 +15,7 @@ This file tracks notable repo changes in progress on this branch.
 - Added demo manifest branding fields and propagated them into demo runtime environment variables.
 - Added an `eBPF_tracker see` shortcut and matching `cargo see` alias for the default dashboard demo flow.
 - Added root agent workflow guidance in `AGENT.md`.
+- Added an initial `attach` CLI scaffold and backend adapter layer so customer-owned container and Kubernetes targets can sit beside the existing managed runtime path.
 
 ### Changed
 
@@ -25,4 +26,6 @@ This file tracks notable repo changes in progress on this branch.
 - Tightened viewer-side noise filtering for infra and toolchain file paths in the live matrix dashboard.
 - Updated examples and docs to describe replay flow, manifest-driven demos, and branded demo artifacts.
 - Updated docs to describe dataset capture, replay-log ingestion, local analysis, and the shorter `see` entrypoint.
+- Documented AWS-first attach scoping around EKS on EC2 and captured the remaining backend/platform follow-up work in `TASKLOG.md`.
+- Clarified the README vocabulary for `run` versus `attach` and made the attach direction explicitly depend on existing eBPF backends instead of a homegrown Kubernetes control plane.
 - Scoped the Docker cleanup helper to tracked `ebpf-tracker` Compose projects so it no longer removes generic cache volumes or prunes global Docker cache unless `--all` is requested.

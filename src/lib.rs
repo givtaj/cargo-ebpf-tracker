@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use attach::{parse_attach_args, run_attach, AttachArgs, AttachParseOutcome};
 use ebpf_tracker_events::{stream_record_for_line, EventKind, StreamRecord};
 use ebpf_tracker_perf::{
     default_perf_event_kinds, perf_trace_expression, stream_record_for_perf_trace_line,
@@ -18,6 +19,7 @@ use runtime::{
 };
 use serde::Deserialize;
 
+mod attach;
 mod runtime;
 
 const DEFAULT_PROBE: &str = "/probes/execve.bt";
@@ -156,6 +158,7 @@ impl DemoBranding {
 }
 
 enum ParseOutcome {
+    Attach(AttachArgs),
     Help,
     Demo(DemoArgs),
     Run(CliArgs),
@@ -256,6 +259,7 @@ fn print_usage() {
     eprintln!(
         "Usage: eBPF_tracker [--probe <file-or-name>] [--config <path>] [--log-enable] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--runtime <auto|rust|node>] [--dashboard] [--dashboard-port <port>] <command> [args...]"
     );
+    eprintln!("Usage: eBPF_tracker attach <docker|k8s|aws-eks|aws-ecs> [--backend <inspektor-gadget|tetragon>] [--namespace <ns>] [--selector <label-selector>] [--pod <name>] [--cluster <name>] [--region <aws-region>] [--service <name>] [--task <id>] [--container <name>]");
     eprintln!("Usage: eBPF_tracker demo [--list] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--dashboard] [--dashboard-port <port>] [example-name]");
     eprintln!("Usage: eBPF_tracker see [--port <port>] [example-name]");
     eprintln!("Default emit mode: raw");
@@ -271,6 +275,8 @@ fn print_usage() {
     eprintln!("Example: eBPF_tracker --emit jsonl cargo run");
     eprintln!("Example: eBPF_tracker --transport perf --emit jsonl cargo run");
     eprintln!("Example: eBPF_tracker --runtime node /bin/sh -lc \"npm run dev\"");
+    eprintln!("Example: eBPF_tracker attach k8s --selector app=payments");
+    eprintln!("Example: eBPF_tracker attach aws-eks --cluster prod --region us-east-1 --selector app=payments");
     eprintln!("Example: eBPF_tracker --dashboard cargo run");
     eprintln!("Example: eBPF_tracker demo --dashboard session-io-demo");
     eprintln!("Example: eBPF_tracker see");
@@ -318,6 +324,12 @@ fn parse_dashboard_port(raw_port: &str) -> Result<u16, String> {
 }
 
 fn parse_args(args: Vec<String>) -> Result<ParseOutcome, String> {
+    if matches!(args.first().map(String::as_str), Some("attach")) {
+        return match parse_attach_args(&args[1..])? {
+            AttachParseOutcome::Help => Ok(ParseOutcome::Help),
+            AttachParseOutcome::Run(attach_args) => Ok(ParseOutcome::Attach(attach_args)),
+        };
+    }
     if matches!(args.first().map(String::as_str), Some("demo")) {
         return parse_demo_args(&args[1..]);
     }
@@ -1699,6 +1711,7 @@ fn run() -> Result<i32, String> {
             print_usage();
             Ok(0)
         }
+        ParseOutcome::Attach(attach_args) => run_attach(attach_args),
         ParseOutcome::Demo(demo_args) => {
             if demo_args.dashboard.enabled {
                 if demo_args.list_examples {

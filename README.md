@@ -56,6 +56,16 @@ For v0.1, the product contract is:
 - attach `bpftrace` for the lifetime of the wrapped command
 - show useful kernel-level events for that command session
 
+## Mode Vocabulary
+
+The product should expose two explicit modes:
+
+- `run`: the customer runs inside our managed runtime. That is the current repo behavior today.
+- `attach`: the customer keeps their own container, Docker Compose stack, or Kubernetes workload, and we attach our tracing layer to that target.
+
+In other words, `run` means we own the runtime boundary, while `attach` means
+the customer owns the runtime boundary and we integrate observability around it.
+
 ## Requirements
 
 - Rust toolchain to build or install `eBPF_tracker`
@@ -172,6 +182,42 @@ Project-local probe file:
 ```bash
 eBPF_tracker --probe ./probes/custom.bt cargo run
 ```
+
+## Attach Mode
+
+The managed-runtime path stays unchanged, but the CLI now also scaffolds a
+separate `attach` path for customer-owned runtimes.
+
+That means the product can grow in two directions:
+
+- `eBPF_tracker cargo run`: keep using our Docker-backed runtime as today
+- `eBPF_tracker attach ...`: keep the customer's container or cluster setup and attach our tracing layer to that target
+
+For `attach`, we should not build the whole Kubernetes eBPF control plane
+ourselves. The product direction is to integrate with existing attach-friendly
+backends such as `inspektor-gadget` or `tetragon`, then normalize those results
+into the shared `eBPF_tracker` event stream and downstream tools.
+
+Current scaffold examples:
+
+```bash
+eBPF_tracker attach k8s --selector app=payments
+eBPF_tracker attach aws-eks --cluster prod --region us-east-1 --selector app=payments
+eBPF_tracker attach aws-ecs --cluster prod --service api
+eBPF_tracker attach docker --container payments-api
+```
+
+The current `attach` command is a scaffold only. It validates target and
+backend selection, prints the planned integration path, and records the repo
+follow-up tasks, but it does not start tracing yet.
+
+First-wave attach scope:
+
+- `inspektor-gadget` is the first backend to implement for `k8s` and `aws-eks`
+- `tetragon` is the next backend for long-running cluster attach on `k8s` and `aws-eks`
+- AWS-first scope stays on EKS clusters backed by EC2 nodes only
+- `aws-ecs` remains planned work after the EKS path is stable, and first-wave ECS scope stays on the EC2 launch type
+- `aws-eks` Fargate and `aws-ecs` Fargate stay out of first-wave attach scope because the attach model depends on host-level eBPF access
 
 ## Event Stream
 
