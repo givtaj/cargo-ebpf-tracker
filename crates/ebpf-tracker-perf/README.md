@@ -1,27 +1,42 @@
 # ebpf-tracker-perf
 
-Transport crate for the non-default `perf` runtime path and future native
+Transport crate for the non-default `perf` path and future native
 kernel-to-userspace transport work.
 
-Current purpose:
+What this crate does today:
 
 - normalize Linux `perf trace` output into `StreamRecord` values
-- define the planned transport boundary after the default `bpftrace` + stdout path
-- keep perf-event-array and ring-buffer decisions outside the CLI crate
-- give future native probes a home without muddying the current release path
+- keep the CLI's transport boundary separate from the default `bpftrace` +
+  stdout path
+- provide a small userspace counter layer for aggregate metrics
+- leave perf-event-array and ring-buffer decisions out of the CLI crate
 
-Current status:
+Current coverage:
 
-- the root CLI can now run with `--transport perf`
-- this crate parses `perf trace` syscall lines for `execve`, `openat`, `write`,
-  and `connect`
-- this crate also synthesizes aggregate counts so the JSONL contract stays
-  compatible with downstream consumers
+- the root CLI can run with `--transport perf`
+- `parse_perf_trace_line` accepts the current `perf trace` shape used by this
+  project: `timestamp: comm/pid syscall(args) = return`
+- supported syscall kinds are `execve`, `openat`, `write`, and `connect`
+- `stream_record_for_perf_trace_line_at` turns supported lines into
+  `StreamRecord::Syscall`
+- `PerfTraceSession` emits `StreamRecord::Aggregate` values for `execve`,
+  `openat`, `writes`, and `connects`
+- `default_perf_event_kinds()` currently returns `execve` only, which matches
+  the default probe path in the CLI
+- `default_transport_plan()` documents the current split between the shipped
+  `bpftrace` stdout path, the available `perf trace` path, and future
+  perf-event-array / ring-buffer work
 
-Current limitation:
+Current limitations:
 
-- in plain `perf trace` mode, file-path arguments are best-effort and may be
-  omitted when `perf trace` cannot decode userspace string pointers
+- file-path arguments are best-effort and may be omitted when `perf trace`
+  cannot decode userspace string pointers
+- `write` and `connect` parsing only captures the fields this crate already
+  normalizes: `count`/`len` for bytes and `fd`/`sockfd` for file descriptors
+- unsupported syscall names and malformed lines are ignored rather than
+  partially decoded
+- this crate does not provide direct perf-event-array or ring-buffer capture
+  yet
 
 Future work here:
 

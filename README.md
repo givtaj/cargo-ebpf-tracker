@@ -3,8 +3,6 @@
 `eBPF_tracker` is a CLI that wraps commands like `cargo run` or `npm test`,
 starts a Linux runtime with Docker, and attaches `bpftrace` for the lifetime of
 that command.
-The public GitHub repo is `cargo-ebpf-tracker`:
-[cargo-ebpf-tracker](https://github.com/givtaj/cargo-ebpf-tracker)
 
 ## Current Product
 
@@ -15,6 +13,7 @@ The public GitHub repo is `cargo-ebpf-tracker`:
 - Default built-in probe is `execve.bt`.
 - Supports config-driven generated probes for `exec`, `write`, `open`, and `connect`.
 - Can mirror terminal output into `./logs`.
+- Exposes `run`, `demo`, `see`, and `attach` entry paths for the main CLI.
 
 ## What It Means In Practice
 
@@ -97,9 +96,9 @@ eBPF_tracker npm test
 That installs the `eBPF_tracker` binary only.
 
 Repo-local helpers such as `cargo demo`, `cargo dataset`, `cargo otel`,
-`cargo jaeger`, and `cargo viewer` are workspace aliases for contributors or
-people running from a local clone of this repository. They are not installed as
-standalone commands by `cargo install`.
+`cargo jaeger`, `cargo see`, and `cargo viewer` are workspace aliases for
+contributors or people running from a local clone of this repository. They are
+not installed as standalone commands by `cargo install`.
 
 Runtime assets are materialized under `~/.cache/ebpf-tracker` by default.
 
@@ -176,8 +175,10 @@ postcard-generator-rust` or `cargo see postcard-generator-rust`.
 
 `--dashboard` launches the repo-local viewer in your browser and forces the
 tracker stream to `--emit jsonl` for that run. Dashboard mode also enables
-`--log-enable` so each traced session leaves a replayable log under `./logs`.
-Use `--dashboard-port 43116` if you need a different local port.
+`--log-enable`, so replay logs are preserved for later review. Regular `run`
+sessions write under the current project's `./logs`, while `demo` and `see`
+sessions write under `examples/<demo-name>/logs/`. Use `--dashboard-port 43116`
+if you need a different local port.
 
 The replay deck is meant to work like trace-analysis software: stored sessions
 can be restarted, paused, stepped, moved backward, or moved forward while the
@@ -187,6 +188,7 @@ Replay a stored session:
 
 ```bash
 cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
+cargo viewer --replay examples/session-io-demo/logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
 ```
 
 For a fast manual smoke check of the viewer itself, prefer:
@@ -340,6 +342,7 @@ If you have cloned this repository, the workspace also includes:
 - `cargo dataset`: repo-local dataset writer for JSONL streams and replay logs
 - `cargo otel`: repo-local OTLP exporter for the JSONL stream
 - `cargo jaeger`: repo-local Jaeger helper commands
+- `cargo see`: repo-local shortcut for the dashboard demo experience
 - `cargo viewer`: repo-local dashboard and replay viewer commands
 - `bash scripts/docker-cleanup.sh`: repo-local Docker cleanup helper for low-disk situations
 
@@ -523,7 +526,7 @@ Expected today:
 
 - No Aya/native Rust eBPF probes yet
 - OTLP export currently derives coarse session and process spans from the raw stream
-- No Kubernetes mode
+- `attach` is still a scaffold; the CLI validates targets and prints a plan, but it does not trace workloads yet
 - No process-tree-only or target-only filtering
 - No direct perf-event-array or ringbuf capture path yet; the current alternate transport is Linux `perf trace`
 - In `--transport perf` mode, file-path fields are best-effort and may be absent when `perf trace` cannot decode userspace string arguments

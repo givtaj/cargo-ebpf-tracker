@@ -13,14 +13,19 @@ runtime = "rust"
 command = ["cargo", "run"]
 clean = ["cargo", "clean", "--quiet", "--target-dir", "target"]
 product_name = "eBPF_tracker"
+product_tagline = "Trace the full command session, then replay it."
+sponsor_name = "cargo-ebpf-tracker"
+sponsor_message = "Replayable syscall demos for Rust and Node."
+sponsor_url = "https://github.com/givtaj/cargo-ebpf-tracker"
 ```
 
 What the demo does:
 
-- `build.rs` reads `input/message.txt` and writes generated Rust into `target`
+- `build.rs` reads `input/message.txt` and writes generated Rust into Cargo's `OUT_DIR`
 - the app reads the same file again at runtime
 - the app opens a loopback TCP connection and exchanges one message
 - the app writes a summary file into `logs/session-summary.txt`
+- the app prints the generated message, the server reply, and a final `wrote logs/session-summary.txt` line
 
 Run it from the repo root:
 
@@ -41,9 +46,11 @@ Open the live dashboard for the same example:
 ```
 
 That dashboard run still uses the same `ebpf-demo.toml` manifest and keeps a
-replayable trace log under `logs/`, so you can reopen the session later with
-`cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log`. The stored
-`session` record carries the same product/sponsor metadata into replay.
+replayable trace log under the example's `logs/` directory, so from the repo
+root you can reopen the session later with
+`cargo viewer --replay examples/session-io-demo/logs/ebpf-tracker-YYYYMMDD-HHMMSS.log`.
+The stored `session` record carries the same product/sponsor metadata into
+replay.
 
 Stream the same demo as JSON Lines:
 
@@ -95,3 +102,4 @@ Why this is a good first example:
 - it is self-contained
 - it uses only the Rust standard library
 - it demonstrates hidden build-script side effects and app behavior in one run
+- it exercises the same session/replay metadata that the dashboard and viewer use
