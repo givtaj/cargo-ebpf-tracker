@@ -340,6 +340,17 @@ Dataset example from a local clone:
 cargo demo --emit jsonl session-io-demo | cargo dataset --test-name session-io-demo
 ```
 
+Intelligence dataset example from a local clone:
+
+```bash
+cargo see --intelligence-dataset session-io-demo
+```
+
+That enables a supervised background dataset job inside the traced run. The live
+viewer keeps streaming syscall state while the intelligence worker buffers
+records, writes `datasets/<run-id>/`, runs the configured model analysis, and
+surfaces its phase and summary in the dashboard.
+
 Replay-log dataset example:
 
 ```bash
@@ -352,11 +363,13 @@ LM Studio analysis example:
 cargo dataset analyze --run datasets/<run-id> --provider lm-studio --model qwen/qwen3.5-9b
 ```
 
-That uses LM Studio's local OpenAI-compatible API by default at
-`http://127.0.0.1:1234/v1` and writes the model output under the run's
-`analysis/` directory. If you switch to a different local or remote
-OpenAI-compatible backend later, keep the same command and swap `--provider`,
-`--endpoint`, and `--model`.
+That uses LM Studio's local server by default at `http://127.0.0.1:1234`. The
+`lm-studio` provider now routes through LM
+Studio's native chat API with reasoning disabled so local Qwen reasoning models
+return final analysis text instead of reasoning-only payloads. Analysis output
+is written under the run's `analysis/` directory. If you switch to a different
+local or remote OpenAI-compatible backend later, keep the same command and swap
+`--provider`, `--endpoint`, and `--model`.
 
 OTLP example from a local clone:
 

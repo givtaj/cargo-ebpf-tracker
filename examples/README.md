@@ -80,6 +80,16 @@ Then analyze the captured run with a local LM Studio model:
 cargo dataset analyze --run datasets/<run-id> --provider lm-studio --model qwen/qwen3.5-9b
 ```
 
+Or let the main tool supervise that flow for you:
+
+```bash
+cargo see --intelligence-dataset session-io-demo
+```
+
+That keeps the dashboard live while a background dataset worker buffers the
+trace, writes a dataset bundle, schedules the LM Studio analysis, and reports
+its phase plus any final summary in the UI.
+
 Without `--emit`, the default mode is `raw`.
 Without `--transport`, the default transport is `bpftrace`.
 

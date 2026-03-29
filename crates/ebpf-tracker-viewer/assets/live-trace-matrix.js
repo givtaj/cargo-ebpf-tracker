@@ -262,6 +262,7 @@ function createState() {
     branding: null,
     library: [],
     activeLibraryId: null,
+    intelligence: null,
     sourceGeneration: 0,
     replay: {
       supported: false,
@@ -570,12 +571,16 @@ function normalizeCommandPart(value, index) {
 function startTracer(options, state, generation, onEnd) {
   const isActive = () => generation === state.sourceGeneration;
   const [program, ...programArgs] = options.command;
+  const interactiveTerminal = Boolean(process.stdin.isTTY);
   const child = spawn(program, programArgs, {
-    stdio: ["ignore", "pipe", "pipe"],
-    env: process.env
+    stdio: ["inherit", "pipe", "pipe"],
+    env: interactiveTerminal
+      ? { ...process.env, EBPF_TRACKER_INTERACTIVE_PTY: "1" }
+      : process.env
   });
 
   let stdoutBuffer = "";
+  let stderrBuffer = "";
   child.stdout.on("data", (chunk) => {
     if (!isActive()) {
       return;
@@ -592,8 +597,18 @@ function startTracer(options, state, generation, onEnd) {
     if (!isActive()) {
       return;
     }
-    const text = chunk.toString("utf8");
-    broadcast(state, "stderr", { text });
+    if (interactiveTerminal) {
+      process.stderr.write(chunk);
+    }
+    stderrBuffer += chunk.toString("utf8");
+    const lines = stderrBuffer.split(/\r?\n/);
+    stderrBuffer = lines.pop() || "";
+    for (const line of lines) {
+      if (ingestIntelligenceLine(line, state)) {
+        continue;
+      }
+      broadcast(state, "stderr", { text: line + "\n" });
+    }
   });
 
   child.on("error", (error) => {
@@ -610,6 +625,11 @@ function startTracer(options, state, generation, onEnd) {
     }
     if (stdoutBuffer.trim()) {
       handleTraceLine(stdoutBuffer, state);
+    }
+    if (stderrBuffer.trim()) {
+      if (!ingestIntelligenceLine(stderrBuffer, state)) {
+        broadcast(state, "stderr", { text: stderrBuffer + "\n" });
+      }
     }
     onEnd(code, signal);
   });
@@ -977,6 +997,7 @@ function clearTraceState(state) {
   state.writes = [];
   state.startedAt = Date.now();
   state.progress.emitted = 0;
+  state.intelligence = null;
 }
 
 function emptyCounters() {
@@ -1102,6 +1123,7 @@ function buildSnapshot(state) {
     status: state.status,
     progress: state.progress,
     branding: state.branding,
+    intelligence: state.intelligence,
     library: state.library.map((entry) => ({
       id: entry.id,
       title: entry.title,
@@ -1113,6 +1135,29 @@ function buildSnapshot(state) {
     activeLibraryId: state.activeLibraryId,
     replay: state.replay
   };
+}
+
+function ingestIntelligenceLine(line, state) {
+  const status = parseIntelligenceStatusLine(line);
+  if (!status) {
+    return false;
+  }
+  state.intelligence = status;
+  broadcast(state, "snapshot", buildSnapshot(state));
+  return true;
+}
+
+function parseIntelligenceStatusLine(line) {
+  const prefix = "intelligence-status ";
+  const trimmed = String(line || "").trim();
+  if (!trimmed.startsWith(prefix)) {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed.slice(prefix.length));
+  } catch {
+    return null;
+  }
 }
 
 function loadLibraryEntry(state, entryId) {
@@ -1367,12 +1412,13 @@ function renderHtml() {
         max-width: 1500px;
         margin: 0 auto;
         padding: 18px 18px 32px;
+        width: 100%;
       }
 
       .hero {
         display: grid;
         gap: 16px;
-        grid-template-columns: 1.1fr 0.9fr;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
         margin-bottom: 16px;
         align-items: start;
       }
@@ -1387,6 +1433,7 @@ function renderHtml() {
 
       .hero-copy {
         padding: 22px 24px;
+        min-width: 0;
       }
 
       .eyebrow {
@@ -1409,6 +1456,7 @@ function renderHtml() {
         border-radius: 18px;
         background: linear-gradient(135deg, rgba(114,182,255,0.18), rgba(60,255,20,0.1));
         border: 1px solid rgba(114,182,255,0.24);
+        min-width: 0;
       }
 
       .brand-card small {
@@ -1424,6 +1472,7 @@ function renderHtml() {
         display: block;
         font-size: 1.25rem;
         line-height: 1.1;
+        overflow-wrap: anywhere;
       }
 
       .brand-card p {
@@ -1448,6 +1497,7 @@ function renderHtml() {
         border-radius: 18px;
         background: rgba(8, 14, 24, 0.78);
         border: 1px solid rgba(123,255,185,0.16);
+        min-width: 0;
       }
 
       .story-card small {
@@ -1463,6 +1513,7 @@ function renderHtml() {
         display: block;
         font-size: 1.02rem;
         line-height: 1.15;
+        overflow-wrap: anywhere;
       }
 
       .story-card p {
@@ -1487,6 +1538,15 @@ function renderHtml() {
         display: grid;
         gap: 12px;
         align-content: start;
+        min-width: 0;
+      }
+
+      .status-box > div {
+        min-width: 0;
+      }
+
+      .status-box > div small {
+        overflow-wrap: anywhere;
       }
 
       .status-chip {
@@ -1507,9 +1567,10 @@ function renderHtml() {
         padding: 14px;
         border-radius: 18px;
         background:
-          linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)),
+        linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)),
           rgba(0,0,0,0.22);
         border: 1px solid rgba(60, 255, 20, 0.14);
+        min-width: 0;
       }
 
       .transport-deck.disabled {
@@ -1522,6 +1583,34 @@ function renderHtml() {
         margin-top: 6px;
         padding-top: 14px;
         border-top: 1px solid rgba(60, 255, 20, 0.12);
+        min-width: 0;
+      }
+
+      .intelligence-box {
+        display: grid;
+        gap: 8px;
+        margin-top: 6px;
+        padding: 14px;
+        border-radius: 18px;
+        background:
+          linear-gradient(180deg, rgba(114,182,255,0.12), rgba(255,255,255,0.03)),
+          rgba(0,0,0,0.2);
+        border: 1px solid rgba(114,182,255,0.18);
+      }
+
+      .intelligence-box small,
+      .intelligence-box p {
+        margin: 0;
+        color: var(--muted);
+      }
+
+      .intelligence-summary {
+        margin: 0;
+        max-height: 180px;
+        overflow: auto;
+        white-space: pre-wrap;
+        font: 0.8rem/1.45 "IBM Plex Mono", monospace;
+        color: #d7e7ff;
       }
 
       .library-head {
@@ -1529,6 +1618,8 @@ function renderHtml() {
         justify-content: space-between;
         gap: 12px;
         align-items: baseline;
+        min-width: 0;
+        flex-wrap: wrap;
       }
 
       .library-head small {
@@ -1549,6 +1640,7 @@ function renderHtml() {
         border: 1px solid rgba(123, 255, 185, 0.14);
         color: var(--text);
         cursor: pointer;
+        min-width: 0;
       }
 
       .library-entry strong {
@@ -1560,6 +1652,7 @@ function renderHtml() {
       .library-entry small {
         display: block;
         color: var(--muted);
+        overflow-wrap: anywhere;
       }
 
       .library-entry.active {
@@ -1577,6 +1670,8 @@ function renderHtml() {
         gap: 12px;
         align-items: baseline;
         margin-bottom: 12px;
+        min-width: 0;
+        flex-wrap: wrap;
       }
 
       .transport-head strong {
@@ -1591,7 +1686,7 @@ function renderHtml() {
 
       .transport-buttons {
         display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
         gap: 8px;
       }
 
@@ -1605,6 +1700,7 @@ function renderHtml() {
         text-transform: uppercase;
         letter-spacing: 0.08em;
         cursor: pointer;
+        min-width: 0;
       }
 
       .transport-btn:hover:not(:disabled) {
@@ -1618,7 +1714,7 @@ function renderHtml() {
 
       .knob-row {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: 14px;
         margin-top: 14px;
       }
@@ -1631,6 +1727,7 @@ function renderHtml() {
         padding: 8px 6px 2px;
         border-radius: 16px;
         background: rgba(0,0,0,0.14);
+        min-width: 0;
       }
 
       .knob-input {
@@ -1696,12 +1793,13 @@ function renderHtml() {
       .metrics {
         display: grid;
         gap: 12px;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
         margin-bottom: 16px;
       }
 
       .metric {
         padding: 16px;
+        min-width: 0;
       }
 
       .metric .label {
@@ -1736,10 +1834,12 @@ function renderHtml() {
       .stack {
         display: grid;
         gap: 16px;
+        min-width: 0;
       }
 
       .section {
         padding: 20px;
+        min-width: 0;
       }
 
       h2 {
@@ -1793,7 +1893,7 @@ function renderHtml() {
 
       .row {
         display: grid;
-        grid-template-columns: auto 1fr auto;
+        grid-template-columns: auto minmax(0, 1fr) auto;
         gap: 12px;
         align-items: center;
         padding: 12px 14px;
@@ -1801,6 +1901,7 @@ function renderHtml() {
         background: rgba(60,255,20,0.05);
         border: 1px solid rgba(60,255,20,0.1);
         font-size: 0.94rem;
+        min-width: 0;
       }
 
       .pill {
@@ -1819,10 +1920,17 @@ function renderHtml() {
       .row strong,
       .row code {
         display: block;
+        min-width: 0;
       }
 
       .row small {
         color: var(--muted);
+      }
+
+      .row code,
+      .bar-label span,
+      .library-entry strong {
+        overflow-wrap: anywhere;
       }
 
       .bar-list {
@@ -1840,6 +1948,8 @@ function renderHtml() {
         justify-content: space-between;
         gap: 10px;
         font: 700 0.82rem/1.2 "IBM Plex Mono", monospace;
+        min-width: 0;
+        flex-wrap: wrap;
       }
 
       .bar {
@@ -1865,6 +1975,8 @@ function renderHtml() {
         border: 1px solid rgba(60,255,20,0.12);
         color: #d8ffe0;
         font: 0.82rem/1.45 "IBM Plex Mono", monospace;
+        white-space: pre-wrap;
+        word-break: break-word;
       }
 
       #recent-events {
@@ -1886,8 +1998,47 @@ function renderHtml() {
       }
 
       @media (max-width: 1120px) {
-        .hero, .layout, .metrics {
+        .hero, .layout {
           grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 720px) {
+        main {
+          padding: 12px 12px 24px;
+        }
+
+        .hero-copy,
+        .status-box,
+        .section {
+          padding: 16px;
+        }
+
+        .panel {
+          border-radius: 18px;
+        }
+
+        h1 {
+          font-size: clamp(2.2rem, 11vw, 3.4rem);
+        }
+
+        .transport-buttons {
+          grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        }
+
+        .knob-row {
+          grid-template-columns: 1fr;
+        }
+
+        .row {
+          grid-template-columns: 1fr;
+          gap: 6px;
+          align-items: start;
+        }
+
+        .transport-head,
+        .library-head {
+          align-items: start;
         }
       }
     </style>
@@ -1935,16 +2086,26 @@ function renderHtml() {
           </div>
         </div>
         <aside class="panel status-box">
-          <div class="status-chip" id="status-chip">connecting</div>
-          <div><strong>mode</strong><br><small id="mode-box">live</small></div>
-          <div><strong>focus</strong><br><small id="focus-box">auto</small></div>
-          <div><strong>progress</strong><br><small id="progress-box">0 / 0</small></div>
-          <div><strong>viewer</strong><br><small id="viewer-url">waiting for server</small></div>
+          <div class="status-chip" id="status-chip" role="status" aria-live="polite">connecting</div>
+          <div><strong>mode</strong><br><small id="mode-box" aria-live="polite">live</small></div>
+          <div><strong>focus</strong><br><small id="focus-box" aria-live="polite">auto</small></div>
+          <div><strong>progress</strong><br><small id="progress-box" aria-live="polite">0 / 0</small></div>
+          <div><strong>viewer</strong><br><small id="viewer-url" aria-live="polite">waiting for server</small></div>
+          <div><strong>connection</strong><br><small id="connection-box" aria-live="polite">connecting</small></div>
           <div><strong>command</strong><pre id="command-box">starting...</pre></div>
+          <section class="intelligence-box" id="intelligence-box" hidden>
+            <div class="library-head">
+              <strong>Intelligence</strong>
+              <small id="intelligence-phase">idle</small>
+            </div>
+            <small id="intelligence-detail">dataset worker idle</small>
+            <small id="intelligence-paths"></small>
+            <pre class="intelligence-summary" id="intelligence-summary"></pre>
+          </section>
           <section class="transport-deck" id="transport-deck">
             <div class="transport-head">
               <strong>Replay Deck</strong>
-              <small id="transport-note">live stream, controls bypassed</small>
+              <small id="transport-note" aria-live="polite">live stream, controls bypassed</small>
             </div>
             <div class="transport-buttons">
               <button class="transport-btn" id="restart-btn" type="button">restart</button>
@@ -2030,7 +2191,11 @@ function renderHtml() {
       const eventSource = new EventSource("/events");
       const state = {
         recentRain: [],
-        stderr: []
+        stderr: [],
+        connection: {
+          status: "connecting",
+          detail: "waiting for viewer stream"
+        }
       };
 
       const els = {
@@ -2044,6 +2209,12 @@ function renderHtml() {
         stderrBox: document.getElementById("stderr-box"),
         commandBox: document.getElementById("command-box"),
         viewerUrl: document.getElementById("viewer-url"),
+        connectionBox: document.getElementById("connection-box"),
+        intelligenceBox: document.getElementById("intelligence-box"),
+        intelligencePhase: document.getElementById("intelligence-phase"),
+        intelligenceDetail: document.getElementById("intelligence-detail"),
+        intelligencePaths: document.getElementById("intelligence-paths"),
+        intelligenceSummary: document.getElementById("intelligence-summary"),
         productName: document.getElementById("product-name"),
         productTagline: document.getElementById("product-tagline"),
         sponsorBox: document.getElementById("sponsor-box"),
@@ -2087,6 +2258,18 @@ function renderHtml() {
         renderSnapshot(snapshot);
       });
 
+      eventSource.addEventListener("open", () => {
+        setConnectionState("connected", "event stream live");
+      });
+
+      eventSource.addEventListener("error", () => {
+        const status = eventSource.readyState === EventSource.CLOSED ? "disconnected" : "reconnecting";
+        const detail = status === "disconnected"
+          ? "viewer stream unavailable"
+          : "waiting for reconnect";
+        setConnectionState(status, detail);
+      });
+
       eventSource.addEventListener("event", (message) => {
         const event = JSON.parse(message.data);
         addRainLine(event);
@@ -2118,6 +2301,8 @@ function renderHtml() {
           els.viewerUrl.textContent = payload.url;
         }
       });
+
+      setConnectionState("connecting", "waiting for viewer stream");
 
       els.restartBtn.addEventListener("click", () => sendControl("restart"));
       els.backwardBtn.addEventListener("click", () =>
@@ -2166,6 +2351,7 @@ function renderHtml() {
         if (snapshot.status) {
           els.statusChip.textContent = snapshot.status;
         }
+        renderIntelligence(snapshot.intelligence || null);
         if (snapshot.mode) {
           els.modeBox.textContent = snapshot.mode;
         }
@@ -2260,6 +2446,53 @@ function renderHtml() {
           els.sponsorLink.hidden = true;
           els.sponsorLink.removeAttribute("href");
         }
+      }
+
+      function renderIntelligence(intelligence) {
+        if (!intelligence) {
+          els.intelligenceBox.hidden = true;
+          els.intelligenceSummary.textContent = "";
+          els.intelligencePaths.textContent = "";
+          return;
+        }
+
+        els.intelligenceBox.hidden = false;
+        els.intelligencePhase.textContent = intelligence.phase || "idle";
+
+        const details = [];
+        if (intelligence.message) {
+          details.push(intelligence.message);
+        }
+        if (Number.isFinite(Number(intelligence.buffered_records))) {
+          details.push(formatNumber(Number(intelligence.buffered_records)) + " buffered");
+        }
+        if (intelligence.run_id) {
+          details.push(intelligence.run_id);
+        }
+        els.intelligenceDetail.textContent = details.join(" · ");
+
+        const paths = [];
+        if (intelligence.dataset_dir) {
+          paths.push(intelligence.dataset_dir);
+        }
+        if (intelligence.analysis_markdown) {
+          paths.push("markdown ready");
+        }
+        if (intelligence.analysis_json) {
+          paths.push("json ready");
+        }
+        if (intelligence.error) {
+          paths.push("error");
+        }
+        els.intelligencePaths.textContent = paths.join(" · ");
+        els.intelligenceSummary.textContent =
+          intelligence.summary_excerpt || intelligence.error || "";
+      }
+
+      function setConnectionState(status, detail) {
+        state.connection.status = status;
+        state.connection.detail = detail;
+        els.connectionBox.textContent = detail ? status + " · " + detail : status;
       }
 
       function renderLibrary(entries, activeLibraryId) {

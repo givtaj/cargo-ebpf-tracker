@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufReader, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -13,6 +13,10 @@ use ebpf_tracker_perf::{
     default_perf_event_kinds, perf_trace_expression, stream_record_for_perf_trace_line,
     PerfTraceSession,
 };
+use intelligence::{
+    append_intelligence_args, parse_intelligence_arg, IntelligenceOptions, IntelligenceReporter,
+    IntelligenceSupervisor,
+};
 use runtime::{
     configure_runtime_command, parse_runtime_selection, resolve_compose_file,
     resolve_runtime_profile, write_if_changed, RuntimeProfile, RuntimeSelection,
@@ -20,6 +24,7 @@ use runtime::{
 use serde::Deserialize;
 
 mod attach;
+mod intelligence;
 mod runtime;
 
 const DEFAULT_PROBE: &str = "/probes/execve.bt";
@@ -30,6 +35,7 @@ const DEFAULT_EXAMPLE_NAME: &str = "session-io-demo";
 const EXAMPLES_DIR_NAME: &str = "examples";
 const DEMO_MANIFEST_FILE_NAME: &str = "ebpf-demo.toml";
 const DEFAULT_DASHBOARD_PORT: u16 = 43115;
+const INTERACTIVE_PTY_ENV_NAME: &str = "EBPF_TRACKER_INTERACTIVE_PTY";
 const DEMO_ENV_NAME: &str = "EBPF_TRACKER_DEMO_NAME";
 const DEMO_ENV_PRODUCT_NAME: &str = "EBPF_TRACKER_DEMO_PRODUCT_NAME";
 const DEMO_ENV_PRODUCT_TAGLINE: &str = "EBPF_TRACKER_DEMO_PRODUCT_TAGLINE";
@@ -73,6 +79,7 @@ struct CliArgs {
     transport_mode: TransportMode,
     runtime_selection: RuntimeSelection,
     dashboard: DashboardOptions,
+    intelligence: IntelligenceOptions,
     command: Vec<String>,
     session_record: Option<StreamRecord>,
     extra_env: Vec<(String, String)>,
@@ -86,6 +93,7 @@ struct DemoArgs {
     emit_mode: EmitMode,
     transport_mode: TransportMode,
     dashboard: DashboardOptions,
+    intelligence: IntelligenceOptions,
 }
 
 #[derive(Debug)]
@@ -158,8 +166,8 @@ impl DemoBranding {
 }
 
 enum ParseOutcome {
-    Attach(AttachArgs),
     Help,
+    Attach(AttachArgs),
     Demo(DemoArgs),
     Run(CliArgs),
 }
@@ -257,11 +265,11 @@ impl RuntimeSelection {
 
 fn print_usage() {
     eprintln!(
-        "Usage: eBPF_tracker [--probe <file-or-name>] [--config <path>] [--log-enable] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--runtime <auto|rust|node>] [--dashboard] [--dashboard-port <port>] <command> [args...]"
+        "Usage: eBPF_tracker [--probe <file-or-name>] [--config <path>] [--log-enable] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--runtime <auto|rust|node>] [--dashboard] [--dashboard-port <port>] [--intelligence-dataset] [--intelligence-provider <lm-studio|openai-compatible>] [--intelligence-model <name>] [--intelligence-endpoint <url>] <command> [args...]"
     );
     eprintln!("Usage: eBPF_tracker attach <docker|k8s|aws-eks|aws-ecs> [--backend <inspektor-gadget|tetragon>] [--namespace <ns>] [--selector <label-selector>] [--pod <name>] [--cluster <name>] [--region <aws-region>] [--service <name>] [--task <id>] [--container <name>]");
-    eprintln!("Usage: eBPF_tracker demo [--list] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--dashboard] [--dashboard-port <port>] [example-name]");
-    eprintln!("Usage: eBPF_tracker see [--port <port>] [example-name]");
+    eprintln!("Usage: eBPF_tracker demo [--list] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--dashboard] [--dashboard-port <port>] [--intelligence-dataset] [--intelligence-provider <lm-studio|openai-compatible>] [--intelligence-model <name>] [example-name]");
+    eprintln!("Usage: eBPF_tracker see [--port <port>] [--intelligence-dataset] [--intelligence-provider <lm-studio|openai-compatible>] [--intelligence-model <name>] [example-name]");
     eprintln!("Default emit mode: raw");
     eprintln!("Default transport: bpftrace");
     eprintln!("Default runtime: auto");
@@ -278,6 +286,8 @@ fn print_usage() {
     eprintln!("Example: eBPF_tracker attach k8s --selector app=payments");
     eprintln!("Example: eBPF_tracker attach aws-eks --cluster prod --region us-east-1 --selector app=payments");
     eprintln!("Example: eBPF_tracker --dashboard cargo run");
+    eprintln!("Example: eBPF_tracker see --intelligence-dataset session-io-demo");
+    eprintln!("Example: eBPF_tracker --dashboard --intelligence-dataset cargo run");
     eprintln!("Example: eBPF_tracker demo --dashboard session-io-demo");
     eprintln!("Example: eBPF_tracker see");
     eprintln!("Example: eBPF_tracker see postcard-generator-rust");
@@ -344,9 +354,14 @@ fn parse_args(args: Vec<String>) -> Result<ParseOutcome, String> {
     let mut transport_mode = TransportMode::Bpftrace;
     let mut runtime_selection = RuntimeSelection::Auto;
     let mut dashboard = DashboardOptions::default();
+    let mut intelligence = IntelligenceOptions::default();
     let mut index = 0usize;
 
     while index < args.len() {
+        if parse_intelligence_arg(&args, &mut index, &mut intelligence)? {
+            continue;
+        }
+
         let arg = &args[index];
         match arg.as_str() {
             "--probe" => {
@@ -469,6 +484,7 @@ fn parse_args(args: Vec<String>) -> Result<ParseOutcome, String> {
         transport_mode,
         runtime_selection,
         dashboard,
+        intelligence,
         command,
         session_record: None,
         extra_env: Vec::new(),
@@ -482,9 +498,14 @@ fn parse_demo_args(args: &[String]) -> Result<ParseOutcome, String> {
     let mut emit_mode = EmitMode::Raw;
     let mut transport_mode = TransportMode::Bpftrace;
     let mut dashboard = DashboardOptions::default();
+    let mut intelligence = IntelligenceOptions::default();
     let mut index = 0usize;
 
     while index < args.len() {
+        if parse_intelligence_arg(args, &mut index, &mut intelligence)? {
+            continue;
+        }
+
         let arg = &args[index];
         match arg.as_str() {
             "-h" | "--help" => return Ok(ParseOutcome::Help),
@@ -561,6 +582,7 @@ fn parse_demo_args(args: &[String]) -> Result<ParseOutcome, String> {
         emit_mode,
         transport_mode,
         dashboard,
+        intelligence,
     }))
 }
 
@@ -570,9 +592,14 @@ fn parse_see_args(args: &[String]) -> Result<ParseOutcome, String> {
         enabled: true,
         port: DEFAULT_DASHBOARD_PORT,
     };
+    let mut intelligence = IntelligenceOptions::default();
     let mut index = 0usize;
 
     while index < args.len() {
+        if parse_intelligence_arg(args, &mut index, &mut intelligence)? {
+            continue;
+        }
+
         let arg = &args[index];
         match arg.as_str() {
             "-h" | "--help" => return Ok(ParseOutcome::Help),
@@ -615,6 +642,7 @@ fn parse_see_args(args: &[String]) -> Result<ParseOutcome, String> {
         emit_mode: EmitMode::Jsonl,
         transport_mode: TransportMode::Bpftrace,
         dashboard,
+        intelligence,
     }))
 }
 
@@ -869,6 +897,7 @@ fn build_tracker_args_for_dashboard(cli_args: &CliArgs) -> Vec<String> {
     args.push(cli_args.transport_mode.as_str().to_string());
     args.push("--runtime".to_string());
     args.push(cli_args.runtime_selection.as_str().to_string());
+    append_intelligence_args(&mut args, &cli_args.intelligence);
     args.push("--".to_string());
     args.extend(cli_args.command.iter().cloned());
 
@@ -892,6 +921,8 @@ fn build_demo_args_for_dashboard(demo_args: &DemoArgs) -> Vec<String> {
     if let Some(example_name) = &demo_args.example_name {
         args.push(example_name.clone());
     }
+
+    append_intelligence_args(&mut args, &demo_args.intelligence);
 
     args
 }
@@ -958,27 +989,41 @@ fn forward_dashboard_stderr<R: Read>(reader: R) -> io::Result<()> {
     let mut reader = BufReader::new(reader);
     let mut stderr = io::stderr();
     let mut opened = false;
-    let mut line = Vec::new();
+    let mut buffer = [0u8; 16 * 1024];
+    let mut pending = Vec::new();
 
     loop {
-        line.clear();
-        let read_bytes = reader.read_until(b'\n', &mut line)?;
+        let read_bytes = reader.read(&mut buffer)?;
         if read_bytes == 0 {
             break;
         }
 
-        let text = String::from_utf8_lossy(&line);
-        if !opened {
-            if let Some(url) = parse_dashboard_url(&text) {
-                if let Err(err) = try_open_browser(url) {
-                    writeln!(stderr, "dashboard ready at {url} ({err})")?;
+        let chunk = &buffer[..read_bytes];
+        stderr.write_all(chunk)?;
+        stderr.flush()?;
+
+        pending.extend_from_slice(chunk);
+        while let Some(newline_index) = pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = pending.drain(..=newline_index).collect();
+            if !opened {
+                let text = String::from_utf8_lossy(&line);
+                if let Some(url) = parse_dashboard_url(&text) {
+                    if let Err(err) = try_open_browser(url) {
+                        writeln!(stderr, "dashboard ready at {url} ({err})")?;
+                    }
+                    opened = true;
                 }
-                opened = true;
             }
         }
+    }
 
-        stderr.write_all(&line)?;
-        stderr.flush()?;
+    if !opened && !pending.is_empty() {
+        let text = String::from_utf8_lossy(&pending);
+        if let Some(url) = parse_dashboard_url(&text) {
+            if let Err(err) = try_open_browser(url) {
+                writeln!(stderr, "dashboard ready at {url} ({err})")?;
+            }
+        }
     }
 
     Ok(())
@@ -1009,6 +1054,13 @@ fn run_with_dashboard(
         .stdin(Stdio::inherit())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .envs(
+            io::stdin()
+                .is_terminal()
+                .then_some([(INTERACTIVE_PTY_ENV_NAME, "1")])
+                .into_iter()
+                .flatten(),
+        )
         .spawn()
         .map_err(|err| {
             format!(
@@ -1043,7 +1095,7 @@ fn run_with_dashboard(
         .map_err(|_| "dashboard stderr forwarding thread panicked".to_string())?;
     err_result.map_err(|err| format!("dashboard stderr forwarding failed: {err}"))?;
 
-    Ok(exit_code(status))
+    Ok(exit_code(&status))
 }
 
 fn build_compose_command(
@@ -1083,6 +1135,12 @@ fn build_compose_command(
             .arg(format!("EBPF_TRACKER_PERF_EVENTS={perf_events}"));
     }
 
+    if interactive_pty_enabled() {
+        command
+            .arg("-e")
+            .arg(format!("{INTERACTIVE_PTY_ENV_NAME}=1"));
+    }
+
     for (key, value) in &cli_args.extra_env {
         command.arg("-e").arg(format!("{key}={value}"));
     }
@@ -1117,30 +1175,6 @@ fn current_timestamp_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
-}
-
-fn copy_stream<R, W>(mut reader: R, mut terminal: W, log_file: Arc<Mutex<File>>) -> io::Result<()>
-where
-    R: Read,
-    W: Write,
-{
-    let mut buffer = [0u8; 16 * 1024];
-    loop {
-        let read_bytes = reader.read(&mut buffer)?;
-        if read_bytes == 0 {
-            break;
-        }
-
-        terminal.write_all(&buffer[..read_bytes])?;
-        terminal.flush()?;
-
-        let mut file = log_file
-            .lock()
-            .map_err(|_| io::Error::other("log file lock poisoned"))?;
-        file.write_all(&buffer[..read_bytes])?;
-        file.flush()?;
-    }
-    Ok(())
 }
 
 fn append_log_bytes(log_file: &Arc<Mutex<File>>, bytes: &[u8]) -> io::Result<()> {
@@ -1196,6 +1230,7 @@ fn process_jsonl_line_bytes(
     log_file: Option<&Arc<Mutex<File>>>,
     terminal_lock: &Arc<Mutex<()>>,
     transport_mode: TransportMode,
+    intelligence: Option<&IntelligenceReporter>,
     summary: &mut JsonlCopySummary,
 ) -> io::Result<()> {
     if let Some(record) = stream_record_for_bytes(line_bytes, transport_mode) {
@@ -1204,6 +1239,9 @@ fn process_jsonl_line_bytes(
         }
         if transport_mode == TransportMode::Perf {
             summary.perf_session.observe(&record);
+        }
+        if let Some(intelligence) = intelligence {
+            intelligence.observe(&record);
         }
         emit_stream_record(&record, terminal_lock)?;
     } else {
@@ -1219,6 +1257,12 @@ fn process_jsonl_line_bytes(
 #[derive(Default)]
 struct JsonlCopySummary {
     perf_session: PerfTraceSession,
+}
+
+#[derive(Clone, Copy)]
+enum TerminalTarget {
+    Stdout,
+    Stderr,
 }
 
 fn emit_stream_record(record: &StreamRecord, terminal_lock: &Arc<Mutex<()>>) -> io::Result<()> {
@@ -1274,6 +1318,7 @@ fn copy_stream_jsonl<R: Read>(
     log_file: Option<Arc<Mutex<File>>>,
     terminal_lock: Arc<Mutex<()>>,
     transport_mode: TransportMode,
+    intelligence: Option<IntelligenceReporter>,
 ) -> io::Result<JsonlCopySummary> {
     let mut reader = BufReader::new(reader);
     let mut buffer = [0u8; 16 * 1024];
@@ -1295,6 +1340,7 @@ fn copy_stream_jsonl<R: Read>(
                 log_file.as_ref(),
                 &terminal_lock,
                 transport_mode,
+                intelligence.as_ref(),
                 &mut summary,
             )?;
         }
@@ -1306,11 +1352,83 @@ fn copy_stream_jsonl<R: Read>(
             log_file.as_ref(),
             &terminal_lock,
             transport_mode,
+            intelligence.as_ref(),
             &mut summary,
         )?;
     }
 
     Ok(summary)
+}
+
+fn forward_terminal_bytes(
+    bytes: &[u8],
+    terminal_lock: &Arc<Mutex<()>>,
+    target: TerminalTarget,
+) -> io::Result<()> {
+    let _terminal = terminal_lock
+        .lock()
+        .map_err(|_| io::Error::other("terminal lock poisoned"))?;
+
+    match target {
+        TerminalTarget::Stdout => {
+            let mut stdout = io::stdout();
+            stdout.write_all(bytes)?;
+            stdout.flush()?;
+        }
+        TerminalTarget::Stderr => {
+            let mut stderr = io::stderr();
+            stderr.write_all(bytes)?;
+            stderr.flush()?;
+        }
+    }
+
+    Ok(())
+}
+
+fn copy_stream_passthrough<R: Read>(
+    reader: R,
+    log_file: Option<Arc<Mutex<File>>>,
+    terminal_lock: Arc<Mutex<()>>,
+    terminal_target: TerminalTarget,
+    transport_mode: TransportMode,
+    intelligence: Option<IntelligenceReporter>,
+) -> io::Result<()> {
+    let mut reader = BufReader::new(reader);
+    let mut buffer = [0u8; 16 * 1024];
+    let mut pending = Vec::new();
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+
+        let chunk = &buffer[..read];
+        forward_terminal_bytes(chunk, &terminal_lock, terminal_target)?;
+        if let Some(log_file) = log_file.as_ref() {
+            append_log_bytes(log_file, chunk)?;
+        }
+
+        pending.extend_from_slice(chunk);
+        while let Some(newline_index) = pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = pending.drain(..=newline_index).collect();
+            if let Some(record) = stream_record_for_bytes(&line, transport_mode) {
+                if let Some(intelligence) = intelligence.as_ref() {
+                    intelligence.observe(&record);
+                }
+            }
+        }
+    }
+
+    if !pending.is_empty() {
+        if let Some(record) = stream_record_for_bytes(&pending, transport_mode) {
+            if let Some(intelligence) = intelligence.as_ref() {
+                intelligence.observe(&record);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn run_with_jsonl(
@@ -1319,6 +1437,7 @@ fn run_with_jsonl(
     log_enable: bool,
     transport_mode: TransportMode,
     initial_record: Option<&StreamRecord>,
+    cli_args: &CliArgs,
 ) -> Result<i32, String> {
     let mut child = command
         .stdin(Stdio::inherit())
@@ -1345,21 +1464,61 @@ fn run_with_jsonl(
     };
 
     let terminal_lock = Arc::new(Mutex::new(()));
+    let intelligence = match IntelligenceSupervisor::start(&cli_args.intelligence, cli_args) {
+        Ok(supervisor) => supervisor,
+        Err(err) => {
+            eprintln!("intelligence disabled: {err}");
+            None
+        }
+    };
 
     if let Some(record) = initial_record {
         emit_initial_stream_record(record, log_file.as_ref(), &terminal_lock)
             .map_err(|err| format!("failed to emit session metadata: {err}"))?;
+        if let Some(reporter) = intelligence.as_ref().map(IntelligenceSupervisor::reporter) {
+            reporter.observe(record);
+        }
     }
 
     let out_log = log_file.as_ref().map(Arc::clone);
     let out_terminal = Arc::clone(&terminal_lock);
-    let out_handle =
-        thread::spawn(move || copy_stream_jsonl(stdout, out_log, out_terminal, transport_mode));
+    let out_intelligence = intelligence.as_ref().map(IntelligenceSupervisor::reporter);
+    let out_handle = thread::spawn(move || {
+        copy_stream_jsonl(
+            stdout,
+            out_log,
+            out_terminal,
+            transport_mode,
+            out_intelligence,
+        )
+    });
 
     let err_log = log_file.as_ref().map(Arc::clone);
     let err_terminal = Arc::clone(&terminal_lock);
-    let err_handle =
-        thread::spawn(move || copy_stream_jsonl(stderr, err_log, err_terminal, transport_mode));
+    let err_handle = if interactive_pty_enabled() {
+        thread::spawn(move || {
+            copy_stream_passthrough(
+                stderr,
+                err_log,
+                err_terminal,
+                TerminalTarget::Stderr,
+                transport_mode,
+                None,
+            )
+            .map(|_| JsonlCopySummary::default())
+        })
+    } else {
+        let err_intelligence = intelligence.as_ref().map(IntelligenceSupervisor::reporter);
+        thread::spawn(move || {
+            copy_stream_jsonl(
+                stderr,
+                err_log,
+                err_terminal,
+                transport_mode,
+                err_intelligence,
+            )
+        })
+    };
 
     let status = child
         .wait()
@@ -1383,14 +1542,133 @@ fn run_with_jsonl(
                 emit_stream_record(&record, &terminal_lock).map_err(|err| {
                     format!("failed to emit perf aggregate records as jsonl: {err}")
                 })?;
+                if let Some(reporter) = intelligence.as_ref().map(IntelligenceSupervisor::reporter)
+                {
+                    reporter.observe(&record);
+                }
             }
         }
     }
 
-    Ok(exit_code(status))
+    if let Some(intelligence) = intelligence {
+        if let Err(err) = intelligence.finish(exit_code(&status), exit_signal_label(&status)) {
+            eprintln!("intelligence job failed: {err}");
+        }
+    }
+
+    Ok(exit_code(&status))
 }
 
-fn exit_code(status: ExitStatus) -> i32 {
+fn run_with_raw_capture(
+    mut command: Command,
+    project_dir: &Path,
+    log_enable: bool,
+    transport_mode: TransportMode,
+    initial_record: Option<&StreamRecord>,
+    cli_args: &CliArgs,
+) -> Result<i32, String> {
+    let log_file = if log_enable {
+        let (log_file, log_file_path) = create_log_file(project_dir)?;
+        eprintln!("logging enabled: {}", log_file_path.display());
+        Some(log_file)
+    } else {
+        None
+    };
+
+    let mut child = command
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| format!("failed to run docker compose: {err}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture child stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture child stderr".to_string())?;
+
+    let terminal_lock = Arc::new(Mutex::new(()));
+    let intelligence = match IntelligenceSupervisor::start(&cli_args.intelligence, cli_args) {
+        Ok(supervisor) => supervisor,
+        Err(err) => {
+            eprintln!("intelligence disabled: {err}");
+            None
+        }
+    };
+
+    if let Some(record) = initial_record {
+        if let Some(reporter) = intelligence.as_ref().map(IntelligenceSupervisor::reporter) {
+            reporter.observe(record);
+        }
+    }
+
+    let out_log = log_file.as_ref().map(Arc::clone);
+    let out_terminal = Arc::clone(&terminal_lock);
+    let out_intelligence = intelligence.as_ref().map(IntelligenceSupervisor::reporter);
+    let out_handle = thread::spawn(move || {
+        copy_stream_passthrough(
+            stdout,
+            out_log,
+            out_terminal,
+            TerminalTarget::Stdout,
+            transport_mode,
+            out_intelligence,
+        )
+    });
+
+    let err_log = log_file.as_ref().map(Arc::clone);
+    let err_terminal = Arc::clone(&terminal_lock);
+    let err_intelligence = intelligence.as_ref().map(IntelligenceSupervisor::reporter);
+    let err_handle = thread::spawn(move || {
+        copy_stream_passthrough(
+            stderr,
+            err_log,
+            err_terminal,
+            TerminalTarget::Stderr,
+            transport_mode,
+            err_intelligence,
+        )
+    });
+
+    let status = child
+        .wait()
+        .map_err(|err| format!("failed waiting for docker compose: {err}"))?;
+
+    let out_result = out_handle
+        .join()
+        .map_err(|_| "stdout forwarding thread panicked".to_string())?;
+    out_result.map_err(|err| format!("stdout forwarding failed: {err}"))?;
+
+    let err_result = err_handle
+        .join()
+        .map_err(|_| "stderr forwarding thread panicked".to_string())?;
+    err_result.map_err(|err| format!("stderr forwarding failed: {err}"))?;
+
+    if let Some(intelligence) = intelligence {
+        if let Err(err) = intelligence.finish(exit_code(&status), exit_signal_label(&status)) {
+            eprintln!("intelligence job failed: {err}");
+        }
+    }
+
+    Ok(exit_code(&status))
+}
+
+fn exit_signal_label(status: &ExitStatus) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        return status.signal().map(|signal| format!("signal-{signal}"));
+    }
+
+    #[allow(unreachable_code)]
+    None
+}
+
+fn exit_code(status: &ExitStatus) -> i32 {
     if let Some(code) = status.code() {
         return code;
     }
@@ -1413,63 +1691,11 @@ fn run_without_log(mut command: Command) -> Result<i32, String> {
         .stderr(Stdio::inherit())
         .status()
         .map_err(|err| format!("failed to run docker compose: {err}"))?;
-    Ok(exit_code(status))
+    Ok(exit_code(&status))
 }
 
-fn run_with_log(mut command: Command, project_dir: &Path) -> Result<i32, String> {
-    let logs_dir = project_dir.join("logs");
-    fs::create_dir_all(&logs_dir)
-        .map_err(|err| format!("failed to create logs dir {}: {err}", logs_dir.display()))?;
-
-    let timestamp = timestamp_for_filename();
-    let log_file_path = logs_dir.join(format!("ebpf-tracker-{timestamp}.log"));
-    eprintln!("logging enabled: {}", log_file_path.display());
-
-    let log_file = File::create(&log_file_path).map_err(|err| {
-        format!(
-            "failed to create log file {}: {err}",
-            log_file_path.display()
-        )
-    })?;
-    let log_file = Arc::new(Mutex::new(log_file));
-
-    let mut child = command
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| format!("failed to run docker compose: {err}"))?;
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "failed to capture child stdout".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "failed to capture child stderr".to_string())?;
-
-    let log_stdout = Arc::clone(&log_file);
-    let out_handle = thread::spawn(move || copy_stream(stdout, io::stdout(), log_stdout));
-
-    let log_stderr = Arc::clone(&log_file);
-    let err_handle = thread::spawn(move || copy_stream(stderr, io::stderr(), log_stderr));
-
-    let status = child
-        .wait()
-        .map_err(|err| format!("failed waiting for docker compose: {err}"))?;
-
-    let out_result = out_handle
-        .join()
-        .map_err(|_| "stdout forwarding thread panicked".to_string())?;
-    out_result.map_err(|err| format!("stdout forwarding failed: {err}"))?;
-
-    let err_result = err_handle
-        .join()
-        .map_err(|_| "stderr forwarding thread panicked".to_string())?;
-    err_result.map_err(|err| format!("stderr forwarding failed: {err}"))?;
-
-    Ok(exit_code(status))
+fn interactive_pty_enabled() -> bool {
+    matches!(std::env::var(INTERACTIVE_PTY_ENV_NAME).as_deref(), Ok("1"))
 }
 
 fn is_repo_root(candidate: &Path) -> bool {
@@ -1617,7 +1843,7 @@ fn clean_example(example_dir: &Path, clean_command: Option<&[String]>) -> Result
         Err(format!(
             "clean command failed in {} with exit code {}",
             example_dir.display(),
-            exit_code(status)
+            exit_code(&status)
         ))
     }
 }
@@ -1654,6 +1880,7 @@ fn run_demo(demo_args: DemoArgs) -> Result<i32, String> {
             transport_mode: demo_args.transport_mode,
             runtime_selection: manifest.runtime_selection,
             dashboard: DashboardOptions::default(),
+            intelligence: demo_args.intelligence,
             command: manifest.command,
             session_record,
             extra_env,
@@ -1696,9 +1923,17 @@ fn run_cli(cli_args: CliArgs, project_dir: PathBuf) -> Result<i32, String> {
             cli_args.log_enable,
             cli_args.transport_mode,
             cli_args.session_record.as_ref(),
+            &cli_args,
         )
-    } else if cli_args.log_enable {
-        run_with_log(command, &project_dir)
+    } else if cli_args.log_enable || cli_args.intelligence.enabled {
+        run_with_raw_capture(
+            command,
+            &project_dir,
+            cli_args.log_enable,
+            cli_args.transport_mode,
+            cli_args.session_record.as_ref(),
+            &cli_args,
+        )
     } else {
         run_without_log(command)
     }
@@ -1763,8 +1998,9 @@ mod tests {
         build_demo_args_for_dashboard, build_generated_probe, build_runtime_override,
         build_tracker_args_for_dashboard, load_config, load_demo_manifest, parse_args,
         parse_dashboard_url, repo_root_from, stream_record_for_bytes, DashboardOptions, EmitMode,
-        ParseOutcome, RuntimeConfig, TransportMode, DEFAULT_DASHBOARD_PORT,
+        IntelligenceOptions, ParseOutcome, RuntimeConfig, TransportMode, DEFAULT_DASHBOARD_PORT,
     };
+    use crate::attach::{AttachBackend, AttachPlatform};
     use crate::runtime::RuntimeSelection;
     use ebpf_tracker_events::StreamRecord;
     use std::fs;
@@ -2026,6 +2262,51 @@ mod tests {
     }
 
     #[test]
+    fn attach_args_parse_platform_and_backend() {
+        let parsed = parse_args(vec![
+            "attach".to_string(),
+            "aws-eks".to_string(),
+            "--backend=tetragon".to_string(),
+            "--cluster=prod-cluster".to_string(),
+            "--selector=app=payments".to_string(),
+        ])
+        .expect("args should parse");
+
+        match parsed {
+            ParseOutcome::Attach(attach_args) => {
+                assert_eq!(attach_args.platform, AttachPlatform::AwsEks);
+                assert_eq!(attach_args.backend, AttachBackend::Tetragon);
+                assert_eq!(attach_args.cluster.as_deref(), Some("prod-cluster"));
+                assert_eq!(attach_args.selector.as_deref(), Some("app=payments"));
+            }
+            _ => panic!("expected attach outcome"),
+        }
+    }
+
+    #[test]
+    fn cli_args_parse_intelligence_options() {
+        let parsed = parse_args(vec![
+            "--intelligence-dataset".to_string(),
+            "--intelligence-model".to_string(),
+            "qwen/qwen3.5-9b".to_string(),
+            "cargo".to_string(),
+            "run".to_string(),
+        ])
+        .expect("args should parse");
+
+        match parsed {
+            ParseOutcome::Run(cli_args) => {
+                assert!(cli_args.intelligence.enabled);
+                assert_eq!(
+                    cli_args.intelligence.model.as_deref(),
+                    Some("qwen/qwen3.5-9b")
+                );
+            }
+            _ => panic!("expected run outcome"),
+        }
+    }
+
+    #[test]
     fn demo_args_parse_dashboard_options() {
         let parsed = parse_args(vec![
             "demo".to_string(),
@@ -2114,6 +2395,7 @@ mod tests {
                 enabled: true,
                 port: DEFAULT_DASHBOARD_PORT,
             },
+            intelligence: IntelligenceOptions::default(),
             command: vec!["npm".to_string(), "test".to_string()],
             session_record: None,
             extra_env: Vec::new(),
@@ -2152,6 +2434,7 @@ mod tests {
                 enabled: true,
                 port: DEFAULT_DASHBOARD_PORT,
             },
+            intelligence: IntelligenceOptions::default(),
         });
 
         assert_eq!(
@@ -2166,6 +2449,30 @@ mod tests {
                 "session-io-demo",
             ]
         );
+    }
+
+    #[test]
+    fn dashboard_demo_args_append_intelligence_flags() {
+        let args = build_demo_args_for_dashboard(&super::DemoArgs {
+            example_name: Some("session-io-demo".to_string()),
+            list_examples: false,
+            log_enable: false,
+            emit_mode: EmitMode::Raw,
+            transport_mode: TransportMode::Bpftrace,
+            dashboard: DashboardOptions {
+                enabled: true,
+                port: DEFAULT_DASHBOARD_PORT,
+            },
+            intelligence: IntelligenceOptions {
+                enabled: true,
+                model: Some("qwen/qwen3.5-9b".to_string()),
+                ..IntelligenceOptions::default()
+            },
+        });
+
+        assert!(args.contains(&"--intelligence-dataset".to_string()));
+        assert!(args.contains(&"--intelligence-model".to_string()));
+        assert!(args.contains(&"qwen/qwen3.5-9b".to_string()));
     }
 
     #[test]

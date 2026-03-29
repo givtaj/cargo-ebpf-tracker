@@ -54,6 +54,9 @@ This file tracks user-requested work and delegated agent tasks in progress on th
 
 ### Dataset And Learning Pipeline Exploration
 
+- 2026-03-29 | Task: Verify the supervised `--intelligence-dataset` flow is commit-ready as a standalone topic and identify whether current evidence artifacts should be regenerated or excluded | Owner: Codex | Status: completed | Output: dataset tests green, commit-ready verdict: not yet, stale `datasets/run-*` evidence should be excluded or regenerated
+- 2026-03-29 | Task: Stabilize the supervised `--intelligence-dataset` flow and audit stale LM Studio evidence artifacts for commit readiness | Owner: Codex | Status: completed | Output: `crates/ebpf-tracker-dataset/src/analysis.rs`, `CHANGELOG.md`, `TASKLOG.md`
+- 2026-03-25 | Task: Add a supervised `--intelligence-dataset` flow with live viewer status and LM Studio handoff | Owner: Codex | Status: completed | Output: `src/intelligence.rs`, `src/lib.rs`, `crates/ebpf-tracker-dataset/src/lib.rs`, `crates/ebpf-tracker-viewer/assets/live-trace-matrix.js`, `datasets/run-1774432023773-live/`
 - 2026-03-25 | Task: Evaluate a local agent or extension for turning stream output into a reusable dataset | Agent: Euler | Status: completed | Output: `subagents/euler-stream-dataset-feasibility.md`
 - 2026-03-25 | Task: Demonstrate the dataset feature by running it on a real trace and verifying it with tests | Owner: Codex | Status: completed | Output: `datasets/replay-demo-20260324-212957/`, `datasets/synthetic-jsonl-demo/`
 - 2026-03-25 | Task: Run the full end-to-end `cargo demo --emit jsonl ... | cargo dataset ...` flow and verify local Docker-backed tracing support | Owner: Codex | Status: completed | Output: `datasets/e2e-session-io-demo/`, terminal verification notes

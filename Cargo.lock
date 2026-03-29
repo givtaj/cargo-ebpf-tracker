@@ -112,6 +112,7 @@ dependencies = [
 name = "ebpf-tracker"
 version = "0.1.0"
 dependencies = [
+ "ebpf-tracker-dataset",
  "ebpf-tracker-events",
  "ebpf-tracker-perf",
  "ebpf-tracker-viewer",

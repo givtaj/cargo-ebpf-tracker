@@ -26,6 +26,11 @@ This file tracks notable repo changes in progress on this branch.
 - Tightened viewer-side noise filtering for infra and toolchain file paths in the live matrix dashboard.
 - Updated examples and docs to describe replay flow, manifest-driven demos, and branded demo artifacts.
 - Updated docs to describe dataset capture, replay-log ingestion, local analysis, and the shorter `see` entrypoint.
+- Capped dataset analysis prompt sections so LM Studio can accept runs on smaller `4096`-token local contexts.
+- Added an `--intelligence-dataset` flow that supervises dataset capture and LM Studio analysis from the main tracer, with live dashboard status.
+- Added optional live dataset-analysis tracing so LM Studio server logs and analyzer progress can be watched in real time and persisted per run.
+- Switched the LM Studio dataset analyzer path to LM Studio's native chat API with reasoning disabled so local Qwen models return final analysis content reliably.
+- Made dataset-analysis live logging truly opt-in instead of always echoing analyzer progress on `stderr`.
 - Documented AWS-first attach scoping around EKS on EC2 and captured the remaining backend/platform follow-up work in `TASKLOG.md`.
 - Clarified the README vocabulary for `run` versus `attach` and made the attach direction explicitly depend on existing eBPF backends instead of a homegrown Kubernetes control plane.
 - Scoped the Docker cleanup helper to tracked `ebpf-tracker` Compose projects so it no longer removes generic cache volumes or prunes global Docker cache unless `--all` is requested.

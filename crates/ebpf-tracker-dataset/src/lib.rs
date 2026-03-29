@@ -177,6 +177,20 @@ pub fn ingest_reader<R: BufRead>(
     write_dataset(parsed, config)
 }
 
+pub fn ingest_records(
+    records: &[StreamRecord],
+    config: &DatasetConfig,
+) -> Result<DatasetSummary, String> {
+    write_dataset(
+        ParsedStream {
+            records: records.to_vec(),
+            ignored_lines: 0,
+            non_empty_lines: records.len(),
+        },
+        config,
+    )
+}
+
 pub fn ingest_path(path: &Path, config: &DatasetConfig) -> Result<DatasetSummary, String> {
     let file = File::open(path)
         .map_err(|err| format!("failed to open replay file {}: {err}", path.display()))?;
@@ -506,8 +520,11 @@ mod tests {
     use std::io::Cursor;
     use std::path::PathBuf;
 
+    use ebpf_tracker_events::StreamRecord;
+
     use super::{
-        default_output_root, ingest_reader, read_dataset_input, DatasetConfig, DatasetSource,
+        default_output_root, ingest_reader, ingest_records, read_dataset_input, DatasetConfig,
+        DatasetSource,
     };
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -580,6 +597,40 @@ mod tests {
         let features = fs::read_to_string(summary.output_dir.join("features.json"))
             .expect("features should be readable");
         assert!(features.contains("\"focus_process\": \"session-io-demo\""));
+
+        fs::remove_dir_all(output_root).expect("temp output should be removed");
+    }
+
+    #[test]
+    fn ingest_records_writes_dataset_bundle() {
+        let output_root = temp_dir("records-bundle");
+        let records = vec![
+            serde_json::from_str::<StreamRecord>(
+                "{\"type\":\"session\",\"timestamp_unix_ms\":10,\"demo_name\":\"session-io-demo\",\"product_name\":\"eBPF_tracker\"}",
+            )
+            .expect("session record should parse"),
+            serde_json::from_str::<StreamRecord>(
+                "{\"type\":\"syscall\",\"timestamp_unix_ms\":12,\"kind\":\"connect\",\"comm\":\"session-io-demo\",\"pid\":9,\"fd\":4}",
+            )
+            .expect("syscall record should parse"),
+            serde_json::from_str::<StreamRecord>(
+                "{\"type\":\"aggregate\",\"timestamp_unix_ms\":14,\"metric\":\"writes\",\"value\":1}",
+            )
+            .expect("aggregate record should parse"),
+        ];
+        let config = DatasetConfig {
+            output_root: output_root.clone(),
+            run_id: Some("records-run".to_string()),
+            source: Some(DatasetSource::Live),
+            ..DatasetConfig::default()
+        };
+
+        let summary = ingest_records(&records, &config).expect("dataset bundle should be written");
+
+        assert_eq!(summary.run_id, "records-run");
+        assert_eq!(summary.total_records, 3);
+        assert!(summary.output_dir.join("run.json").is_file());
+        assert!(summary.output_dir.join("features.json").is_file());
 
         fs::remove_dir_all(output_root).expect("temp output should be removed");
     }

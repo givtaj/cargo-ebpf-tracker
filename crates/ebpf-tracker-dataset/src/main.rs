@@ -19,7 +19,7 @@ fn print_usage() {
         "Usage: ebpf-tracker-dataset [--output <dir>] [--replay <path>] [--run-id <id>] [--source <live|replay>] [--command <text>] [--test-name <name>] [--git-sha <sha>] [--transport <bpftrace|perf>] [--runtime <auto|rust|node>] [--exit-code <n>] [--exit-signal <name>] [--log-path <path>]"
     );
     eprintln!(
-        "Usage: ebpf-tracker-dataset analyze --run <dataset-dir> [--provider <lm-studio|openai-compatible>] [--endpoint <url>] [--model <name>] [--api-key <token>] [--temperature <n>] [--max-tokens <n>] [--instructions-file <path>]"
+        "Usage: ebpf-tracker-dataset analyze --run <dataset-dir> [--provider <lm-studio|openai-compatible>] [--endpoint <url>] [--model <name>] [--api-key <token>] [--temperature <n>] [--max-tokens <n>] [--instructions-file <path>] [--live-logs]"
     );
     eprintln!("Reads ebpf-tracker JSONL from stdin unless --replay <path> is provided.");
     eprintln!("Writes a per-run dataset bundle under ./datasets by default.");
@@ -29,6 +29,9 @@ fn print_usage() {
     );
     eprintln!(
         "Example: cargo dataset analyze --run datasets/run-123 --provider lm-studio --model qwen/qwen3.5-9b"
+    );
+    eprintln!(
+        "Example: cargo dataset analyze --run datasets/run-123 --provider lm-studio --model qwen/qwen3.5-9b --live-logs"
     );
 }
 
@@ -278,6 +281,10 @@ fn parse_analyze_args(args: &[String]) -> Result<AnalyzeConfig, String> {
                     .ok_or_else(|| "missing value for --instructions-file".to_string())?;
                 config.instructions_path = Some(PathBuf::from(value));
                 index += 2;
+            }
+            "--live-logs" => {
+                config.live_logs = true;
+                index += 1;
             }
             _ if arg.starts_with("--run=") => {
                 config.run_dir = PathBuf::from(arg.trim_start_matches("--run="));
