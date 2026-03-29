@@ -1,79 +1,34 @@
 # eBPF_tracker
 
-`eBPF_tracker` is a CLI that wraps commands like `cargo run` or `npm test`,
-starts a Linux runtime with Docker, and attaches `bpftrace` for the lifetime of
-that command.
+`eBPF_tracker` is the installable CLI in this workspace. It wraps commands such
+as `cargo run` or `npm run`, runs them inside a Linux Docker runtime, and
+attaches tracing for the lifetime of that session.
 
-## Current Product
+This README stays intentionally high level. The root should explain the product
+and the workspace shape. Detailed behavior belongs in the crate READMEs and
+example READMEs linked below.
 
-- Installable as a Cargo binary.
-- Runs the wrapped command inside a privileged Docker Linux runtime.
-- Supports separate Rust and Node runtime images.
-- Uses `bpftrace` by default and now supports a `perf trace` transport.
-- Default built-in probe is `execve.bt`.
-- Supports config-driven generated probes for `exec`, `write`, `open`, and `connect`.
-- Can mirror terminal output into `./logs`.
-- Exposes `run`, `demo`, `see`, and `attach` entry paths for the main CLI.
+## What It Does
 
-## What It Means In Practice
+- runs Rust and Node commands inside a managed Linux tracing runtime
+- traces the full wrapped session, not only the final app process
+- supports `bpftrace` by default and `perf trace` as an alternate transport
+- can emit raw terminal output or JSONL event streams
+- can launch a repo-local dashboard and replay stored sessions
 
-When you run:
-
-```bash
-eBPF_tracker cargo run
-```
-
-you are tracing the full wrapped command session. That means you will often see `cargo`, `rustc`, linkers, and then your app. This is current behavior, not a bug.
-
-When you run:
-
-```bash
-eBPF_tracker npm test
-```
-
-you are tracing the full wrapped Node session. That usually includes `npm`,
-`node`, package scripts, and any subprocesses they spawn.
-
-## Why A Customer Cares
-
-For a customer, this becomes:
-
-- Explainability: "what did my command actually do?"
-- Input provenance: "which file drove this result?"
-- Safety checks: "did this CLI unexpectedly touch network or extra files?"
-- CI regression detection: "did a new version start reading more files or writing much more?"
-- Test transparency: "which fixtures did the suite actually consume?"
-
-## Release Scope
-
-For v0.1, the product contract is:
-
-- install with Cargo
-- run `eBPF_tracker cargo run` from a Rust project
-- run `eBPF_tracker npm test` from a Node project
-- execute that command inside a Docker-backed Linux runtime
-- attach `bpftrace` for the lifetime of the wrapped command
-- show useful kernel-level events for that command session
-
-## Mode Vocabulary
-
-The product should expose two explicit modes:
-
-- `run`: the customer runs inside our managed runtime. That is the current repo behavior today.
-- `attach`: the customer keeps their own container, Docker Compose stack, or Kubernetes workload, and we attach our tracing layer to that target.
-
-In other words, `run` means we own the runtime boundary, while `attach` means
-the customer owns the runtime boundary and we integrate observability around it.
+If you run `eBPF_tracker cargo run`, you should expect to see the whole session:
+`cargo`, `rustc`, linkers, and then your app. The same idea applies to Node
+commands such as `npm run <script>`.
 
 ## Requirements
 
-- Rust toolchain to build or install `eBPF_tracker`
+- Rust toolchain
 - Docker Desktop or another Docker engine that supports privileged containers
-- Node.js on the host if you want to use the repo-local live dashboard
+- Node.js on the host only if you want the repo-local dashboard/viewer
 
 ## Install
 
-Local install:
+Install from a local clone:
 
 ```bash
 cargo install --path .
@@ -85,492 +40,126 @@ Install from GitHub:
 cargo install --git https://github.com/givtaj/cargo-ebpf-tracker
 ```
 
-After install:
+That installs the `eBPF_tracker` binary only. Repo-local helpers such as
+`cargo demo`, `cargo see`, `cargo dataset`, `cargo otel`, `cargo jaeger`, and
+`cargo viewer` are workspace aliases for contributors working from a clone of
+this repository.
+
+Runtime assets are materialized under `~/.cache/ebpf-tracker` by default. Set
+`EBPF_TRACKER_CACHE_DIR=/your/path` to override that location.
+
+## Quick Start
+
+Basic Rust session:
 
 ```bash
-eBPF_tracker --help
 eBPF_tracker cargo run
+```
+
+Basic Node session:
+
+```bash
 eBPF_tracker npm test
 ```
 
-That installs the `eBPF_tracker` binary only.
-
-Repo-local helpers such as `cargo demo`, `cargo dataset`, `cargo otel`,
-`cargo jaeger`, `cargo see`, and `cargo viewer` are workspace aliases for
-contributors or people running from a local clone of this repository. They are
-not installed as standalone commands by `cargo install`.
-
-Runtime assets are materialized under `~/.cache/ebpf-tracker` by default.
-
-Override that location with:
-
-```bash
-EBPF_TRACKER_CACHE_DIR=/your/path
-```
-
-## Usage
-
-Run without installing:
-
-```bash
-cargo run --bin eBPF_tracker -- cargo run
-```
-
-Runtime selection is modular:
-
-- Rust commands use a Rust runtime image
-- Node commands such as `node`, `npm`, `npx`, `pnpm`, and `yarn` use a Node runtime image
-- `--runtime rust` or `--runtime node` overrides auto-detection when the wrapped command goes through a shell
-- Node support uses a dedicated Node image, not `nvm` inside the tracing container
-
-Other common commands:
-
-```bash
-eBPF_tracker cargo test
-eBPF_tracker cargo check
-eBPF_tracker npm install
-eBPF_tracker npm test
-eBPF_tracker --log-enable cargo run
-eBPF_tracker --emit jsonl cargo run
-eBPF_tracker --transport perf cargo run
-eBPF_tracker --runtime node /bin/sh -lc "npm run dev"
-```
-
-Live dashboard from a local clone:
-
-```bash
-./target/debug/eBPF_tracker --dashboard cargo run
-./target/debug/eBPF_tracker --dashboard npm test
-./target/debug/eBPF_tracker --dashboard node
-./target/debug/eBPF_tracker demo --dashboard session-io-demo
-```
-
-The interactive Node REPL path now keeps a real terminal attached while the
-viewer stays live, so `./target/debug/eBPF_tracker --dashboard node` works for
-side-by-side typing plus dashboard review. Pure in-memory expressions will not
-produce much trace data, so use file, network, or subprocess commands in the
-REPL if you want the dashboard to show richer session activity.
-
-Fastest deterministic UI preview for frontend work:
-
-```bash
-bash scripts/dashboard-smoke.sh
-```
-
-That opens the bundled `session-io-demo` replay on `http://127.0.0.1:43118`
-without tracing infrastructure. Pass a demo name like
-`bash scripts/dashboard-smoke.sh postcard-generator-node` to review a different
-fixture.
-
-Shortest product demo from a local clone:
-
-```bash
-./target/debug/eBPF_tracker see
-cargo see
-```
-
-That is a shortcut for opening the default dashboard demo experience. You can
-also target a specific example with `./target/debug/eBPF_tracker see
-postcard-generator-rust` or `cargo see postcard-generator-rust`.
-
-`--dashboard` launches the repo-local viewer in your browser and forces the
-tracker stream to `--emit jsonl` for that run. Dashboard mode also enables
-`--log-enable`, so replay logs are preserved for later review. Regular `run`
-sessions write under the current project's `./logs`, while `demo` and `see`
-sessions write under `examples/<demo-name>/logs/`. Use `--dashboard-port 43116`
-if you need a different local port.
-
-The replay deck is meant to work like trace-analysis software: stored sessions
-can be restarted, paused, stepped, moved backward, or moved forward while the
-viewer rebuilds the syscall state from the log.
-
-Replay a stored session:
-
-```bash
-cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
-cargo viewer --replay examples/session-io-demo/logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
-```
-
-For a fast manual smoke check of the viewer itself, prefer:
-
-```bash
-bash scripts/dashboard-smoke.sh --no-open
-```
-
-Built-in probe by name:
-
-```bash
-eBPF_tracker --probe execve.bt cargo run
-```
-
-Project-local probe file:
-
-```bash
-eBPF_tracker --probe ./probes/custom.bt cargo run
-```
-
-## Attach Mode
-
-The managed-runtime path stays unchanged, but the CLI now also scaffolds a
-separate `attach` path for customer-owned runtimes.
-
-That means the product can grow in two directions:
-
-- `eBPF_tracker cargo run`: keep using our Docker-backed runtime as today
-- `eBPF_tracker attach ...`: keep the customer's container or cluster setup and attach our tracing layer to that target
-
-For `attach`, we should not build the whole Kubernetes eBPF control plane
-ourselves. The product direction is to integrate with existing attach-friendly
-backends such as `inspektor-gadget` or `tetragon`, then normalize those results
-into the shared `eBPF_tracker` event stream and downstream tools.
-
-Current scaffold examples:
-
-```bash
-eBPF_tracker attach k8s --selector app=payments
-eBPF_tracker attach aws-eks --cluster prod --region us-east-1 --selector app=payments
-eBPF_tracker attach aws-ecs --cluster prod --service api
-eBPF_tracker attach docker --container payments-api
-```
-
-The current `attach` command is a scaffold only. It validates target and
-backend selection, prints the planned integration path, and records the repo
-follow-up tasks, but it does not start tracing yet.
-
-First-wave attach scope:
-
-- `inspektor-gadget` is the first backend to implement for `k8s` and `aws-eks`
-- `tetragon` is the next backend for long-running cluster attach on `k8s` and `aws-eks`
-- AWS-first scope stays on EKS clusters backed by EC2 nodes only
-- `aws-ecs` remains planned work after the EKS path is stable, and first-wave ECS scope stays on the EC2 launch type
-- `aws-eks` Fargate and `aws-ecs` Fargate stay out of first-wave attach scope because the attach model depends on host-level eBPF access
-
-## Event Stream
-
-`eBPF_tracker` can reserve `stdout` for a machine-readable event stream:
+JSONL stream:
 
 ```bash
 eBPF_tracker --emit jsonl cargo run
 ```
 
-In `jsonl` mode:
-
-- `stdout` emits newline-delimited JSON syscall and aggregate events
-- `stderr` keeps normal build output, app output, and runtime errors human-readable
-- without `--emit`, the default mode is `raw`
-- without `--transport`, the default transport is `bpftrace`
-
-That makes it easy to pipe the trace stream into another tool that renders a UI,
-stores the events, or applies custom filtering.
-
-Local dataset bundle example from a clone:
-
-```bash
-eBPF_tracker --emit jsonl cargo run | cargo dataset --test-name cargo-run-smoke
-```
-
-That writes one dataset bundle per run under `./datasets/`, including canonical
-`events.jsonl`, per-process summaries, aggregate metrics, and derived features
-such as the focus process and top files.
-
-The JSONL event contract now lives in the shared workspace crate
-`crates/ebpf-tracker-events`, so future consumers can reuse the same parsing and
-record schema without embedding CLI-specific code.
-
-Alternate runtime transport:
+Alternate `perf` transport:
 
 ```bash
 eBPF_tracker --transport perf --emit jsonl cargo run
 ```
 
-That uses Linux `perf trace` inside the same Docker runtime and normalizes the
-result into the same JSONL contract. Today the `perf` path is strongest for
-`execve`, `write`, `connect`, and aggregate counts; file-path arguments are
-best-effort because plain `perf trace` does not always decode userspace string
-pointers.
-
-## Config
-
-If `ebpf-tracker.toml` exists in the current project, it is picked up automatically.
-You can also pass it explicitly:
+Repo-local dashboard:
 
 ```bash
-eBPF_tracker --config ebpf-tracker.toml cargo run
+./target/debug/eBPF_tracker --dashboard cargo run
+./target/debug/eBPF_tracker see
+cargo see
 ```
 
-`--probe` takes precedence over config-generated probes.
+Project config is optional. If `ebpf-tracker.toml` exists in the current
+project, it is loaded automatically. See
+[`ebpf-tracker.toml.example`](./ebpf-tracker.toml.example).
 
-Example config:
+## Main Modes
 
-```toml
-[probe]
-exec = true
-write = true
-open = false
-connect = false
+- **`run`**: the default mode; trace a wrapped command inside the managed Docker runtime
+- **`demo`**: run one of the repo example manifests under `examples/`
+- **`see`**: shortcut for the repo-local dashboard demo experience
+- **`attach`**: scaffold-only today; validates targets and prints the intended integration path, but does not start tracing yet
 
-[runtime]
-cpus = 2.0
-memory = "4g"
-cpuset = "0-3"
-pids_limit = 512
-```
-
-Available flags:
-
-- `probe.exec`: trace `execve`
-- `probe.write`: trace `write`
-- `probe.open`: trace `openat`
-- `probe.connect`: trace `connect`
-- `runtime.cpus`: Docker CPU quota for the runtime container
-- `runtime.memory`: Docker memory limit like `512m` or `4g`
-- `runtime.cpuset`: Docker CPU set string like `0-3` or `0,1`
-- `runtime.pids_limit`: Docker PID limit, or `-1` for unlimited
-
-See `ebpf-tracker.toml.example`.
-
-## External Example
-
-For a real installed-user walkthrough against a separate public Rust project,
-see [Trace `givtaj/payment-engine`](./docs/trace-payment-engine.md).
-
-## Repo Workspace Helpers
-
-If you have cloned this repository, the workspace also includes:
-
-- `cargo demo`: repo-local example runner
-- `cargo dataset`: repo-local dataset writer for JSONL streams and replay logs
-- `cargo otel`: repo-local OTLP exporter for the JSONL stream
-- `cargo jaeger`: repo-local Jaeger helper commands
-- `cargo see`: repo-local shortcut for the dashboard demo experience
-- `cargo viewer`: repo-local dashboard and replay viewer commands
-- `bash scripts/docker-cleanup.sh`: repo-local Docker cleanup helper for low-disk situations
-
-Docker cleanup examples from a local clone:
+Examples:
 
 ```bash
-bash scripts/docker-cleanup.sh --dry-run
-bash scripts/docker-cleanup.sh --yes
-bash scripts/docker-cleanup.sh --all --yes
+eBPF_tracker cargo test
+eBPF_tracker --runtime node /bin/sh -lc "npm run dev"
+eBPF_tracker demo --list
+eBPF_tracker demo --dashboard session-io-demo
+eBPF_tracker attach k8s --selector app=payments
 ```
 
-The default cleanup only tears down the Compose projects derived from this
-repo's tracked runtime and Jaeger compose files, including cached embedded
-runtime copies under the tracker cache dir. It no longer sweeps generic
-`cargo-target-cache` or `npm-cache` volumes, and it leaves global Docker cache
-alone by default. Use `--all` when you explicitly want a full
-`docker system prune -a --volumes` pass.
+Dashboard runs force `--emit jsonl` and preserve replay logs for later review.
+Regular `run` sessions log under the current project's `./logs`. `demo` and
+`see` sessions log under `examples/<demo-name>/logs/`.
 
-Dataset example from a local clone:
+## Workspace Map
 
-```bash
-cargo demo --emit jsonl session-io-demo | cargo dataset --test-name session-io-demo
-```
+- **Root CLI (`eBPF_tracker`)**: installable command-line entry point, runtime orchestration, config loading, `demo`, `see`, and `attach` flow. Source lives under [`src/`](./src).
+- **`crates/ebpf-tracker-events`**: shared event schema, line parsers, and session aggregation helpers used across the workspace. [README](./crates/ebpf-tracker-events/README.md)
+- **`crates/ebpf-tracker-dataset`**: dataset bundle writer and analyzer for JSONL streams and replay logs. [README](./crates/ebpf-tracker-dataset/README.md)
+- **`crates/ebpf-tracker-otel`**: OTLP exporter plus local Jaeger helper commands. [README](./crates/ebpf-tracker-otel/README.md)
+- **`crates/ebpf-tracker-perf`**: `perf trace` normalizer and transport boundary for the non-default collector path. [README](./crates/ebpf-tracker-perf/README.md)
+- **`crates/ebpf-tracker-viewer`**: browser dashboard and replay viewer. [README](./crates/ebpf-tracker-viewer/README.md)
 
-Intelligence dataset example from a local clone:
+These crates do separate jobs. The root README should not duplicate their full
+behavior contracts.
 
-```bash
-cargo see --intelligence-dataset session-io-demo
-```
+## Repo-Local Commands
 
-That enables a supervised background dataset job inside the traced run. The live
-viewer keeps streaming syscall state while the intelligence worker buffers
-records, writes `datasets/<run-id>/`, runs the configured model analysis, and
-surfaces its phase and summary in the dashboard.
+If you are working from a clone of this repo, the Cargo aliases are:
 
-Replay-log dataset example:
+- `cargo demo`: run example manifests from [`examples/`](./examples/README.md)
+- `cargo see`: shortcut for the default dashboard demo flow
+- `cargo viewer`: launch the live viewer or replay stored sessions
+- `cargo dataset`: capture or analyze dataset bundles
+- `cargo otel`: export JSONL sessions over OTLP
+- `cargo jaeger`: manage the local Jaeger stack used by the OTLP flow
 
-```bash
-cargo dataset --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
-```
+Each command has its own module-level README above.
 
-LM Studio analysis example:
+## Examples
 
-```bash
-cargo dataset analyze --run datasets/<run-id> --provider lm-studio --model qwen/qwen3.5-9b
-```
+Runnable examples live under [`examples/`](./examples/README.md):
 
-That uses LM Studio's local server by default at `http://127.0.0.1:1234`. The
-`lm-studio` provider now routes through LM
-Studio's native chat API with reasoning disabled so local Qwen reasoning models
-return final analysis text instead of reasoning-only payloads. Analysis output
-is written under the run's `analysis/` directory. If you switch to a different
-local or remote OpenAI-compatible backend later, keep the same command and swap
-`--provider`, `--endpoint`, and `--model`.
+- [`examples/session-io-demo`](./examples/session-io-demo/README.md): build-time plus runtime file, network, and output activity in one trace
+- [`examples/postcard-generator-rust`](./examples/postcard-generator-rust/README.md): visible postcard-generation flow in Rust
+- [`examples/postcard-generator-node`](./examples/postcard-generator-node/README.md): the same visible workflow in Node.js
 
-OTLP example from a local clone:
-
-```bash
-eBPF_tracker --emit jsonl cargo run | cargo otel --target jaeger --service-name session-io-demo
-```
-
-That path groups raw records into a session span plus per-process spans, then
-exports them over OTLP to Jaeger or another collector.
-
-Hardened exporter controls:
-
-```bash
-eBPF_tracker --emit jsonl cargo run | cargo otel --target otlp --endpoint http://127.0.0.1:4318 --timeout-seconds 15 --header authorization=Bearer-token
-```
-
-The exporter now:
-
-- validates endpoint URLs and normalizes bare collector URLs to `/v1/traces`
-- rejects empty service names and zero timeouts
-- applies an explicit OTLP request timeout
-- surfaces collector-side partial rejections and warnings on `stderr`
-
-Local Jaeger flow from a clone:
-
-```bash
-cargo jaeger up
-eBPF_tracker --emit jsonl cargo run | cargo otel --target jaeger --service-name session-io-demo
-```
-
-Then open `http://127.0.0.1:16686`.
-
-## Examples In This Repository
-
-If you have cloned this repository, a good first example is
-[`examples/session-io-demo`](./examples/session-io-demo/README.md).
-
-All examples are indexed in
-[`examples/README.md`](./examples/README.md), including the Cargo-based way to
-run them.
-
-Each example is declared by an `ebpf-demo.toml` manifest under `examples/`.
-That manifest selects the runtime (`rust` or `node`), the traced command, and
-an optional clean step that runs before the example starts. It can also carry
-demo branding metadata such as product and sponsor fields; those are emitted as
-typed JSONL session records, stored in replay logs, and shown by the viewer.
-
-It shows why session-based tracing is useful:
-
-- `build.rs` reads and generates files during `cargo run`
-- the app reads a file, opens a local TCP connection, and writes a summary file
-- one `eBPF_tracker` run surfaces all of that activity without changing app code
-
-Run it from the repository root with:
+Useful repo-local entry points:
 
 ```bash
 cargo demo
-```
-
-Dashboard version from a fresh clone:
-
-```bash
-git clone https://github.com/givtaj/cargo-ebpf-tracker
-cd cargo-ebpf-tracker
-cargo build --bin eBPF_tracker
-./target/debug/eBPF_tracker demo --dashboard session-io-demo
-```
-
-That starts the demo trace and opens the live dashboard automatically.
-The shorter equivalent is `./target/debug/eBPF_tracker see`.
-You can also run the repo-built binary from outside the repo, for example
-`/path/to/cargo-ebpf-tracker/target/debug/eBPF_tracker demo session-io-demo`.
-
-Structured stream version:
-
-```bash
 cargo demo --emit jsonl session-io-demo
-```
-
-Same example with the `perf` transport:
-
-```bash
 cargo demo --transport perf --emit jsonl session-io-demo
+cargo viewer --replay examples/session-io-demo/logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
+bash scripts/dashboard-smoke.sh
 ```
 
-Trace UI version:
+## Current Limits
 
-```bash
-cargo jaeger up
-cargo demo --emit jsonl session-io-demo | cargo otel --target jaeger --service-name session-io-demo
-```
+- `attach` is scaffold-only right now
+- the default collector is still `bpftrace`
+- the alternate collector is Linux `perf trace`, not a direct perf-event-array or ring-buffer path
+- there is no stable target-only or process-tree-only filtering yet
+- the viewer is browser-first; it is not a separate native TUI
 
-## Local Checks
+## More Docs
 
-Smoke check:
-
-```bash
-cargo run --bin eBPF_tracker -- /bin/true
-```
-
-Installed-binary check from a Rust project:
-
-```bash
-eBPF_tracker cargo run
-```
-
-Config-driven check from a Rust project:
-
-```bash
-cp ebpf-tracker.toml.example ebpf-tracker.toml
-eBPF_tracker cargo run
-```
-
-Repository demo check:
-
-```bash
-eBPF_tracker demo --list
-```
-
-Expected today:
-
-- first run may build the Docker image
-- default probe output shows `execve ...`
-- config-driven `write/open/connect` output can still be noisy because tracing is per command session, not target-only
-
-## Current Limitations
-
-- No Aya/native Rust eBPF probes yet
-- OTLP export currently derives coarse session and process spans from the raw stream
-- `attach` is still a scaffold; the CLI validates targets and prints a plan, but it does not trace workloads yet
-- No process-tree-only or target-only filtering
-- No direct perf-event-array or ringbuf capture path yet; the current alternate transport is Linux `perf trace`
-- In `--transport perf` mode, file-path fields are best-effort and may be absent when `perf trace` cannot decode userspace string arguments
-- No stable profile system like `minimal/default/full`
-
-## Next TODOs
-
-- Add process-tree-only and target-only filtering so the stream can focus on the app and its children instead of the whole wrapped session
-- Add stable stream profiles like `minimal`, `default`, and `full`
-- Extend `crates/ebpf-tracker-viewer` so it can read JSONL from `stdin` and grow from the current dashboard into a first trace-focused TUI
-- Improve the OTel mapping with parent/child process relationships and better span/event semantics for Jaeger and other collectors
-- Add direct perf-event-array or ringbuf transport after the event model and stream UX are stable
-- Add regression coverage for JSONL mode when Docker, `perf`, or wrapped commands emit non-UTF-8 bytes on `stderr`
-- Keep hardening container-side Cargo isolation so tracing external repos never pollutes host `target/` trees across platforms
-
-## Workspace Direction
-
-This repo stays as one workspace, but the boundaries are now explicit:
-
-- the root package is the installable CLI that runs Docker + `bpftrace`
-- `crates/ebpf-tracker-events` owns the event parsing and JSONL stream schema
-- `crates/ebpf-tracker-otel` maps the JSONL stream into OTLP traces and can manage a local Jaeger collector
-- `crates/ebpf-tracker-dataset` turns JSONL streams or replay logs into per-run dataset bundles
-- `crates/ebpf-tracker-dataset` also ships a provider-adapter based analyzer for local or remote OpenAI-compatible models
-- `crates/ebpf-tracker-perf` normalizes Linux `perf trace` output today and holds the future perf-event-array/ringbuf work
-- `crates/ebpf-tracker-viewer` owns the live matrix dashboard and replay viewer extension
-- future viewers or other consumers should still be added as separate crates under `crates/`
-- `examples/` stays reserved for runnable demo apps, not product code
-
-That keeps the core Unix contract clear: `eBPF_tracker` emits events, and other
-tools decide how to render, store, or forward them.
-
-## Repo Layout
-
-- `Cargo.toml`: workspace manifest plus installable CLI package metadata
-- `src/lib.rs`: installable CLI logic
-- `src/main.rs`: thin binary wrapper for the CLI crate
-- `crates/ebpf-tracker-events`: shared event schema and JSONL parsing crate
-- `crates/ebpf-tracker-dataset`: local dataset writer for runs and replay logs
-- `crates/ebpf-tracker-otel`: OTLP exporter plus local Jaeger helper commands
-- `crates/ebpf-tracker-perf`: `perf trace` normalization plus future perf/ringbuf transport work
-- `crates/ebpf-tracker-viewer`: dashboard and replay viewer extension crate
-- `ebpf-tracker.toml.example`: example config
-- `docker-compose.bpftrace.yml`: runtime definition
-- `docker/bpftrace-rust.Dockerfile`: runtime image
-- `scripts/run-bpftrace-wrap.sh`: container entry wrapper
-- `probes/execve.bt`: built-in default probe
+- [`docs/cli.md`](./docs/cli.md)
+- [`examples/README.md`](./examples/README.md)
+- [`docs/trace-payment-engine.md`](./docs/trace-payment-engine.md)
