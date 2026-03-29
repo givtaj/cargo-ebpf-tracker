@@ -18,6 +18,12 @@ This file tracks user-requested work and delegated agent tasks in progress on th
 
 ## Completed
 
+### Developer Tooling
+
+- 2026-03-29 | Task: Verify the Docker cleanup helper is commit-ready as a standalone topic and only targets this repo's Compose projects by default | Owner: Codex | Status: completed | Output: dry-run verification notes, commit-ready verdict: yes
+- 2026-03-29 | Task: Restrict the Docker cleanup helper so it only removes `ebpf-tracker`-owned Compose stacks for this repo instead of generic cache volumes | Owner: Codex | Status: completed | Output: `scripts/docker-cleanup.sh`, `README.md`, `CHANGELOG.md`, `TASKLOG.md`
+- 2026-03-25 | Task: Add a repo-local Docker cleanup script for reclaiming disk space from tracing runtimes and Jaeger helpers | Owner: Codex | Status: completed | Output: `scripts/docker-cleanup.sh`, `README.md`, `TASKLOG.md`
+
 ### Workflow And Project Hygiene
 
 - 2026-03-25 | Task: Add task tracking workflow and root task log | Owner: Codex | Status: completed | Output: `AGENT.md`, `TASKLOG.md`

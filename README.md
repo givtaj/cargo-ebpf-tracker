@@ -271,6 +271,22 @@ If you have cloned this repository, the workspace also includes:
 - `cargo otel`: repo-local OTLP exporter for the JSONL stream
 - `cargo jaeger`: repo-local Jaeger helper commands
 - `cargo viewer`: repo-local dashboard and replay viewer commands
+- `bash scripts/docker-cleanup.sh`: repo-local Docker cleanup helper for low-disk situations
+
+Docker cleanup examples from a local clone:
+
+```bash
+bash scripts/docker-cleanup.sh --dry-run
+bash scripts/docker-cleanup.sh --yes
+bash scripts/docker-cleanup.sh --all --yes
+```
+
+The default cleanup only tears down the Compose projects derived from this
+repo's tracked runtime and Jaeger compose files, including cached embedded
+runtime copies under the tracker cache dir. It no longer sweeps generic
+`cargo-target-cache` or `npm-cache` volumes, and it leaves global Docker cache
+alone by default. Use `--all` when you explicitly want a full
+`docker system prune -a --volumes` pass.
 
 Dataset example from a local clone:
 
