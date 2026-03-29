@@ -53,7 +53,7 @@ repository root:
 
 Dashboard runs still execute the example's `ebpf-demo.toml` manifest, but they
 also preserve a replayable session log in that example's `logs/` directory.
-Use `cargo viewer -- --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log` to walk
+Use `cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log` to walk
 backward or forward through a stored run.
 That stored log now includes the manifest's product/sponsor metadata as a
 typed `session` record, so replay keeps the same demo branding as the live run.

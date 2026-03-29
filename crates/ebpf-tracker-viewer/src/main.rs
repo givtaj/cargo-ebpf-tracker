@@ -15,6 +15,11 @@ fn main() {
 
 fn run() -> Result<i32, String> {
     let args: Vec<String> = env::args().skip(1).collect();
+    if viewer_help_requested(&args) {
+        print_usage();
+        return Ok(0);
+    }
+
     let mut command = ebpf_tracker_viewer::build_node_command(&args)?;
     let mut child = command
         .stdin(Stdio::inherit())
@@ -50,6 +55,42 @@ fn run() -> Result<i32, String> {
     err_result.map_err(|err| format!("viewer stderr forwarding failed: {err}"))?;
 
     Ok(exit_code(status))
+}
+
+fn print_usage() {
+    eprintln!(
+        "Usage: ebpf-tracker-viewer [--port <port>] [--host <host>] [--replay <path>] [--speed <x>] [--interval-ms <ms>] [--focus-comm <comm>] [command...]"
+    );
+    eprintln!("Usage: ebpf-tracker-viewer [--port <port>] [--host <host>] -- <command> [args...]");
+    eprintln!("Starts the live trace viewer and opens the browser automatically.");
+    eprintln!("Without --replay, remaining args are traced through eBPF_tracker.");
+    eprintln!("Repository alias: cargo viewer --help");
+    eprintln!("Example: cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log");
+    eprintln!(
+        "Example: cargo viewer --port 43118 --replay datasets/synthetic-jsonl-demo/events.jsonl"
+    );
+    eprintln!("Example: cargo viewer cargo run");
+    eprintln!("Example: cargo viewer -- cargo run --help");
+}
+
+fn viewer_help_requested(args: &[String]) -> bool {
+    let mut index = 0usize;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "-h" | "--help" | "help" => return true,
+            "--" => return false,
+            "--port" | "--host" | "--replay" | "--speed" | "--interval-ms" | "--focus-comm" => {
+                if index + 1 >= args.len() {
+                    return false;
+                }
+                index += 2;
+            }
+            _ => return false,
+        }
+    }
+
+    false
 }
 
 fn forward_stdout<R: Read>(mut reader: R) -> io::Result<()> {
@@ -150,4 +191,44 @@ fn exit_code(status: ExitStatus) -> i32 {
     }
 
     1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_dashboard_url, viewer_help_requested};
+
+    fn owned(parts: &[&str]) -> Vec<String> {
+        parts.iter().map(|part| part.to_string()).collect()
+    }
+
+    #[test]
+    fn help_flag_prints_viewer_usage() {
+        assert!(viewer_help_requested(&owned(&["--help"])));
+        assert!(viewer_help_requested(&owned(&["help"])));
+        assert!(viewer_help_requested(&owned(&[
+            "--port", "43115", "--help"
+        ])));
+        assert!(viewer_help_requested(&owned(&[
+            "--replay",
+            "logs/run.log",
+            "--help"
+        ])));
+    }
+
+    #[test]
+    fn command_help_can_be_passed_through_with_separator() {
+        assert!(!viewer_help_requested(&owned(&[
+            "--", "cargo", "run", "--help"
+        ])));
+        assert!(!viewer_help_requested(&owned(&["cargo", "run", "--help"])));
+    }
+
+    #[test]
+    fn parse_dashboard_url_extracts_browser_target() {
+        assert_eq!(
+            parse_dashboard_url("live trace viewer on http://127.0.0.1:43115"),
+            Some("http://127.0.0.1:43115")
+        );
+        assert_eq!(parse_dashboard_url("replaying: trace.jsonl"), None);
+    }
 }

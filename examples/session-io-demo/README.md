@@ -42,7 +42,7 @@ Open the live dashboard for the same example:
 
 That dashboard run still uses the same `ebpf-demo.toml` manifest and keeps a
 replayable trace log under `logs/`, so you can reopen the session later with
-`cargo viewer -- --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log`. The stored
+`cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log`. The stored
 `session` record carries the same product/sponsor metadata into replay.
 
 Stream the same demo as JSON Lines:

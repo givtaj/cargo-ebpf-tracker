@@ -56,17 +56,19 @@ This file tracks user-requested work and delegated agent tasks in progress on th
 
 - 2026-03-29 | Task: Verify the supervised `--intelligence-dataset` flow is commit-ready as a standalone topic and identify whether current evidence artifacts should be regenerated or excluded | Owner: Codex | Status: completed | Output: dataset tests green, commit-ready verdict: not yet, stale `datasets/run-*` evidence should be excluded or regenerated
 - 2026-03-29 | Task: Stabilize the supervised `--intelligence-dataset` flow and audit stale LM Studio evidence artifacts for commit readiness | Owner: Codex | Status: completed | Output: `crates/ebpf-tracker-dataset/src/analysis.rs`, `CHANGELOG.md`, `TASKLOG.md`
-- 2026-03-25 | Task: Add a supervised `--intelligence-dataset` flow with live viewer status and LM Studio handoff | Owner: Codex | Status: completed | Output: `src/intelligence.rs`, `src/lib.rs`, `crates/ebpf-tracker-dataset/src/lib.rs`, `crates/ebpf-tracker-viewer/assets/live-trace-matrix.js`, `datasets/run-1774432023773-live/`
 - 2026-03-25 | Task: Evaluate a local agent or extension for turning stream output into a reusable dataset | Agent: Euler | Status: completed | Output: `subagents/euler-stream-dataset-feasibility.md`
 - 2026-03-25 | Task: Demonstrate the dataset feature by running it on a real trace and verifying it with tests | Owner: Codex | Status: completed | Output: `datasets/replay-demo-20260324-212957/`, `datasets/synthetic-jsonl-demo/`
 - 2026-03-25 | Task: Run the full end-to-end `cargo demo --emit jsonl ... | cargo dataset ...` flow and verify local Docker-backed tracing support | Owner: Codex | Status: completed | Output: `datasets/e2e-session-io-demo/`, terminal verification notes
+- 2026-03-25 | Task: Add a supervised `--intelligence-dataset` flow with live viewer status and LM Studio handoff | Owner: Codex | Status: completed | Output: `src/intelligence.rs`, `src/lib.rs`, `crates/ebpf-tracker-dataset/src/lib.rs`, `crates/ebpf-tracker-viewer/assets/live-trace-matrix.js`, `datasets/run-1774432023773-live/`
 
 ### Product Entry And CLI Ergonomics
 
+- 2026-03-29 | Task: Make viewer help discovery side-effect free and align replay docs with the actual Cargo alias invocation | Owner: Codex | Status: completed | Output: `crates/ebpf-tracker-viewer/src/main.rs`, `crates/ebpf-tracker-viewer/README.md`, `README.md`, `examples/README.md`, `examples/session-io-demo/README.md`, `docs/trace-payment-engine.md`, `CHANGELOG.md`, `TASKLOG.md`
 - 2026-03-25 | Task: Add a short CLI action to launch the product demo experience | Owner: Codex | Status: completed | Output: `src/lib.rs`, `.cargo/config.toml`, `README.md`
 
 ### Documentation And Onboarding
 
+- 2026-03-29 | Task: Review repo AI-agent friendliness and add a prioritized onboarding checklist | Owner: Codex | Status: completed | Output: `docs/ai-agent-onboarding-checklist.md`, `CHANGELOG.md`, `TASKLOG.md`
 - 2026-03-25 | Task: Audit and refresh README/documentation files for the current product surface | Agent: Meridian | Status: completed | Output: `README.md`, `docs/trace-payment-engine.md`, `examples/README.md`, `examples/session-io-demo/README.md`, `crates/ebpf-tracker-viewer/README.md`, `crates/ebpf-tracker-dataset/README.md`, `subagents/meridian-docs-audit.md`
 
 ### Initiative Review And Closure

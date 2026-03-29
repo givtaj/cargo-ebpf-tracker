@@ -7,8 +7,23 @@ CLI launches it for `--dashboard`, and it can also be run directly to replay
 stored JSONL or mixed trace logs:
 
 ```bash
+cargo viewer --help
+cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
 cargo run -p ebpf-tracker-viewer -- --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
 ```
+
+Use `cargo viewer -- cargo run --help` if you want `--help` to reach the traced
+command instead of the viewer itself.
+
+For deterministic frontend review from the repo root, use:
+
+```bash
+bash scripts/dashboard-smoke.sh
+```
+
+That boots the viewer against the bundled `session-io-demo` replay on
+`http://127.0.0.1:43118` so layout or interaction work can be checked without
+running a tracer first.
 
 The intended model is Wireshark-like trace review:
 

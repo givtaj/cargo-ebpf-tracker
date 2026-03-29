@@ -142,8 +142,26 @@ Live dashboard from a local clone:
 ```bash
 ./target/debug/eBPF_tracker --dashboard cargo run
 ./target/debug/eBPF_tracker --dashboard npm test
+./target/debug/eBPF_tracker --dashboard node
 ./target/debug/eBPF_tracker demo --dashboard session-io-demo
 ```
+
+The interactive Node REPL path now keeps a real terminal attached while the
+viewer stays live, so `./target/debug/eBPF_tracker --dashboard node` works for
+side-by-side typing plus dashboard review. Pure in-memory expressions will not
+produce much trace data, so use file, network, or subprocess commands in the
+REPL if you want the dashboard to show richer session activity.
+
+Fastest deterministic UI preview for frontend work:
+
+```bash
+bash scripts/dashboard-smoke.sh
+```
+
+That opens the bundled `session-io-demo` replay on `http://127.0.0.1:43118`
+without tracing infrastructure. Pass a demo name like
+`bash scripts/dashboard-smoke.sh postcard-generator-node` to review a different
+fixture.
 
 Shortest product demo from a local clone:
 
@@ -168,7 +186,13 @@ viewer rebuilds the syscall state from the log.
 Replay a stored session:
 
 ```bash
-cargo viewer -- --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
+cargo viewer --replay logs/ebpf-tracker-YYYYMMDD-HHMMSS.log
+```
+
+For a fast manual smoke check of the viewer itself, prefer:
+
+```bash
+bash scripts/dashboard-smoke.sh --no-open
 ```
 
 Built-in probe by name:
