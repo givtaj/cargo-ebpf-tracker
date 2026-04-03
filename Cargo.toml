@@ -9,6 +9,7 @@ repository.workspace = true
 homepage.workspace = true
 keywords = ["cargo", "node", "ebpf", "bpftrace", "observability"]
 categories = ["command-line-utilities", "development-tools"]
+publish = false
 
 [workspace]
 members = [
@@ -35,10 +36,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 [dependencies]
-ebpf-tracker-dataset = { path = "crates/ebpf-tracker-dataset" }
-ebpf-tracker-events = { path = "crates/ebpf-tracker-events" }
-ebpf-tracker-perf = { path = "crates/ebpf-tracker-perf" }
-ebpf-tracker-viewer = { path = "crates/ebpf-tracker-viewer" }
+ebpf-tracker-dataset = { version = "0.1.0", path = "crates/ebpf-tracker-dataset" }
+ebpf-tracker-events = { version = "0.1.0", path = "crates/ebpf-tracker-events" }
+ebpf-tracker-perf = { version = "0.1.0", path = "crates/ebpf-tracker-perf" }
+ebpf-tracker-viewer = { version = "0.1.0", path = "crates/ebpf-tracker-viewer" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml = "0.8"

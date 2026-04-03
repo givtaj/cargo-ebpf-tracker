@@ -16,6 +16,11 @@ This file tracks notable repo changes in progress on this branch.
 - Added an `eBPF_tracker see` shortcut and matching `cargo see` alias for the default dashboard demo flow.
 - Added root agent workflow guidance in `AGENT.md`.
 - Added an initial `attach` CLI scaffold and backend adapter layer so customer-owned container and Kubernetes targets can sit beside the existing managed runtime path.
+- Added a baseline GitHub Actions CI workflow for formatting, build, and test checks on pushes and pull requests.
+- Added a tag-driven GitHub Actions release workflow that builds and attaches release archives for the main CLI.
+- Added first-release repository scaffolding with `CONTRIBUTING.md`, `SECURITY.md`, `RELEASE.md`, and GitHub issue/PR templates.
+- Added `scripts/release-check.sh` as a fast generic verification gate for local release prep and tagged builds.
+- Added `scripts/runtime-smoke.sh` for a minimal real tracing smoke path on a maintainer machine with Docker support.
 
 ### Changed
 
@@ -35,3 +40,7 @@ This file tracks notable repo changes in progress on this branch.
 - Made dataset-analysis live logging truly opt-in instead of always echoing analyzer progress on `stderr`.
 - Scoped the Docker cleanup helper to tracked `ebpf-tracker` Compose projects so it no longer removes generic cache volumes or prunes global Docker cache unless `--all` is requested.
 - Made `cargo viewer --help` print deterministic usage instead of launching the browser, and corrected replay examples to use `cargo viewer --replay ...`.
+- Marked the root CLI package and viewer crate as `publish = false` so the initial public release stays GitHub-release-first instead of implying a crates.io publish.
+- Clarified the install and example docs around the GitHub-first release path, repo-local aliases, and generated demo artifacts.
+- Tightened release verification around the checked-in lockfile, fixed the tagged-build target handling in the release workflow, and ignored repo-root release archives under `dist/`.
+- Realigned the release/docs surface for a solo maintainer so GitHub-hosted automation stays generic while local release prep still exercises the real tracer path.

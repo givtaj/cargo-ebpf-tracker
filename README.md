@@ -31,14 +31,18 @@ commands such as `npm run <script>`.
 Install from a local clone:
 
 ```bash
-cargo install --path .
+cargo install --path . --locked
 ```
 
 Install from GitHub:
 
 ```bash
-cargo install --git https://github.com/givtaj/cargo-ebpf-tracker
+cargo install --git https://github.com/givtaj/cargo-ebpf-tracker --locked
 ```
+
+The first public release is GitHub-release-first. Use `cargo install --git ...`
+or a tagged source checkout; the workspace crates are not published to
+crates.io yet.
 
 That installs the `eBPF_tracker` binary only. Repo-local helpers such as
 `cargo demo`, `cargo see`, `cargo dataset`, `cargo otel`, `cargo jaeger`, and
@@ -49,6 +53,18 @@ Runtime assets are materialized under `~/.cache/ebpf-tracker` by default. Set
 `EBPF_TRACKER_CACHE_DIR=/your/path` to override that location.
 
 ## Quick Start
+
+First smoke test after install:
+
+```bash
+eBPF_tracker --help
+```
+
+First real tracing smoke test (requires Docker support):
+
+```bash
+eBPF_tracker /bin/true
+```
 
 Basic Rust session:
 
@@ -163,3 +179,6 @@ bash scripts/dashboard-smoke.sh
 - [`docs/cli.md`](./docs/cli.md)
 - [`examples/README.md`](./examples/README.md)
 - [`docs/trace-payment-engine.md`](./docs/trace-payment-engine.md)
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md)
+- [`SECURITY.md`](./SECURITY.md)
+- [`RELEASE.md`](./RELEASE.md)

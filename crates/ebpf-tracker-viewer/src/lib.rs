@@ -7,8 +7,7 @@ const VIEWER_SCRIPT_FILE_NAME: &str = "live-trace-matrix.js";
 const DEMO_LIBRARY_DIR_NAME: &str = "demo-library";
 const GENERATED_VIEWER_ROOT_PREFIX: &str = "viewer-v";
 const EMBEDDED_VIEWER_SCRIPT: &str = include_str!("../assets/live-trace-matrix.js");
-const EMBEDDED_SESSION_IO_DEMO_REPLAY: &str =
-    include_str!("../demo-library/session-io-demo.jsonl");
+const EMBEDDED_SESSION_IO_DEMO_REPLAY: &str = include_str!("../demo-library/session-io-demo.jsonl");
 const EMBEDDED_POSTCARD_RUST_REPLAY: &str =
     include_str!("../demo-library/postcard-generator-rust.jsonl");
 const EMBEDDED_POSTCARD_NODE_REPLAY: &str =

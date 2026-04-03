@@ -20,6 +20,20 @@ This file tracks user-requested work and delegated agent tasks in progress on th
 
 ## Completed
 
+### First Release Readiness
+
+- 2026-04-03 | Task: Realign the first-release workflow around a solo-maintainer, product-first verification split | Owner: Codex | Status: completed | Output: `scripts/runtime-smoke.sh`, `scripts/release-check.sh`, `README.md`, `docs/cli.md`, `CONTRIBUTING.md`, `.github/pull_request_template.md`, `RELEASE.md`
+- 2026-04-03 | Task: Audit packaging strategy and manifest metadata for an initial public release | Agent: Einstein | Status: completed | Output: `Cargo.toml`, `crates/ebpf-tracker-viewer/Cargo.toml`
+- 2026-04-03 | Task: Add a baseline GitHub CI workflow for format, build, and test verification | Agent: Sagan | Status: completed | Output: `.github/workflows/ci.yml`
+- 2026-04-03 | Task: Add a tagged release workflow for publishing GitHub release artifacts | Agent: Chandrasekhar | Status: completed | Output: `.github/workflows/release.yml`
+- 2026-04-03 | Task: Draft contributor guidance for external users and first-time maintainers | Agent: Ptolemy | Status: completed | Output: `CONTRIBUTING.md`
+- 2026-04-03 | Task: Add a basic security policy and disclosure process | Agent: Jason | Status: completed | Output: `SECURITY.md`
+- 2026-04-03 | Task: Add GitHub issue templates and a pull request template for public collaboration | Agent: Leibniz | Status: completed | Output: `.github/ISSUE_TEMPLATE/`, `.github/pull_request_template.md`
+- 2026-04-03 | Task: Audit install and onboarding docs for a first release and tighten gaps | Agent: Banach | Status: completed | Output: `README.md`, `docs/cli.md`
+- 2026-04-03 | Task: Verify example and demo documentation for external users | Agent: Cicero | Status: completed | Output: `examples/README.md`
+- 2026-04-03 | Task: Draft a maintainer-facing release checklist and runbook | Agent: Boole | Status: completed | Output: `RELEASE.md`
+- 2026-04-03 | Task: Sweep remaining release risks across tests, scripts, and tracked artifacts | Agent: McClintock | Status: completed | Output: `.gitignore`, `.github/workflows/release.yml`, `SECURITY.md`, `README.md`
+
 ### Developer Tooling
 
 - 2026-03-29 | Task: Verify the Docker cleanup helper is commit-ready as a standalone topic and only targets this repo's Compose projects by default | Owner: Codex | Status: completed | Output: dry-run verification notes, commit-ready verdict: yes

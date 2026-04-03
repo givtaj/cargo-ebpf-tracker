@@ -6,6 +6,7 @@ license.workspace = true
 description = "Dashboard and replay viewer extension for ebpf-tracker JSONL streams."
 repository.workspace = true
 homepage.workspace = true
+publish = false
 
 [lib]
 name = "ebpf_tracker_viewer"

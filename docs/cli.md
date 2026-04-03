@@ -4,27 +4,41 @@ This page holds the detailed usage notes for the root `eBPF_tracker` CLI. The
 main [`README.md`](../README.md) stays intentionally short and points here for
 the root-package behavior that does not belong to the extension crates.
 
+## Requirements
+
+- Rust toolchain
+- Docker Desktop or another Docker engine that supports privileged containers
+- Node.js on the host only if you want the repo-local dashboard/viewer flow
+
 ## Install
 
 Install from a local clone:
 
 ```bash
-cargo install --path .
+cargo install --path . --locked
 ```
 
 Install from GitHub:
 
 ```bash
-cargo install --git https://github.com/givtaj/cargo-ebpf-tracker
+cargo install --git https://github.com/givtaj/cargo-ebpf-tracker --locked
 ```
+
+The first public release is GitHub-release-first. Use `cargo install --git ...`
+or a tagged source checkout; the workspace crates are not published to
+crates.io yet.
 
 After install:
 
 ```bash
 eBPF_tracker --help
+eBPF_tracker /bin/true
 eBPF_tracker cargo run
 eBPF_tracker npm run dev
 ```
+
+`eBPF_tracker /bin/true` is the smallest real tracer smoke test and still
+requires Docker support.
 
 That installs the `eBPF_tracker` binary only. Repo-local helpers such as
 `cargo demo`, `cargo see`, `cargo dataset`, `cargo otel`, `cargo jaeger`, and
