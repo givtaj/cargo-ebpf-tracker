@@ -28,7 +28,7 @@ The first public release is GitHub-release-first. Use `cargo install --git ...`
 or a tagged source checkout; the workspace crates are not published to
 crates.io yet.
 
-After install:
+After install, the smallest useful checks are:
 
 ```bash
 eBPF_tracker --help
@@ -38,12 +38,9 @@ eBPF_tracker npm run dev
 ```
 
 `eBPF_tracker /bin/true` is the smallest real tracer smoke test and still
-requires Docker support.
-
-That installs the `eBPF_tracker` binary only. Repo-local helpers such as
-`cargo demo`, `cargo see`, `cargo dataset`, `cargo otel`, `cargo jaeger`, and
-`cargo viewer` remain Cargo aliases for people working from a clone of this
-repository.
+requires Docker support. The `cargo demo`, `cargo see`, `cargo dataset`,
+`cargo otel`, `cargo jaeger`, and `cargo viewer` helpers remain Cargo aliases
+for people working from a clone of this repository.
 
 Runtime assets are materialized under `~/.cache/ebpf-tracker` by default. Set
 `EBPF_TRACKER_CACHE_DIR=/your/path` to override that location.
@@ -197,10 +194,12 @@ Available flags:
 
 See [`ebpf-tracker.toml.example`](../ebpf-tracker.toml.example).
 
-## Attach Mode
+## Attach Mode (Experimental Scaffold)
 
-The managed-runtime path stays unchanged, but the CLI also scaffolds an
-`attach` path for customer-owned runtimes.
+`attach` is intentionally surfaced here as an experimental scaffold rather
+than a finished tracer path. It validates the target you named, prints the
+planned integration path, and records the follow-up tasks, but it does not
+start tracing yet.
 
 Current scaffold examples:
 
@@ -210,10 +209,6 @@ eBPF_tracker attach aws-eks --cluster prod --region us-east-1 --selector app=pay
 eBPF_tracker attach aws-ecs --cluster prod --service api
 eBPF_tracker attach docker --container payments-api
 ```
-
-Today `attach` is scaffold-only. It validates target and backend selection,
-prints the planned integration path, and records the follow-up tasks, but it
-does not start tracing yet.
 
 Current first-wave scope:
 
