@@ -1,6 +1,6 @@
 use std::env;
 use std::fs::{self, File};
-use std::io::{self, BufReader, IsTerminal, Read, Write};
+use std::io::{self, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -8,22 +8,27 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use attach::{parse_attach_args, run_attach, AttachArgs, AttachParseOutcome};
+use compose::{build_compose_command, ComposeRunConfig};
+use dashboard::{
+    build_demo_args_for_dashboard, build_tracker_args_for_dashboard, run_with_dashboard,
+};
 use ebpf_tracker_events::{stream_record_for_line, EventKind, StreamRecord};
 use ebpf_tracker_perf::{
     default_perf_event_kinds, perf_trace_expression, stream_record_for_perf_trace_line,
     PerfTraceSession,
 };
 use intelligence::{
-    append_intelligence_args, parse_intelligence_arg, IntelligenceOptions, IntelligenceReporter,
-    IntelligenceSupervisor,
+    parse_intelligence_arg, IntelligenceOptions, IntelligenceReporter, IntelligenceSupervisor,
 };
 use runtime::{
-    configure_runtime_command, parse_runtime_selection, resolve_compose_file,
-    resolve_runtime_profile, write_if_changed, RuntimeProfile, RuntimeSelection,
+    parse_runtime_selection, resolve_compose_file_with_source, resolve_runtime_profile,
+    write_if_changed, RuntimeAssetResolution, RuntimeAssetSource, RuntimeProfile, RuntimeSelection,
 };
 use serde::Deserialize;
 
 mod attach;
+mod compose;
+mod dashboard;
 mod intelligence;
 mod runtime;
 
@@ -267,7 +272,7 @@ fn print_usage() {
     eprintln!(
         "Usage: eBPF_tracker [--probe <file-or-name>] [--config <path>] [--log-enable] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--runtime <auto|rust|node>] [--dashboard] [--dashboard-port <port>] [--intelligence-dataset] [--intelligence-provider <lm-studio|openai-compatible>] [--intelligence-model <name>] [--intelligence-endpoint <url>] <command> [args...]"
     );
-    eprintln!("Usage: eBPF_tracker attach <docker|k8s|aws-eks|aws-ecs> [--backend <inspektor-gadget|tetragon>] [--namespace <ns>] [--selector <label-selector>] [--pod <name>] [--cluster <name>] [--region <aws-region>] [--service <name>] [--task <id>] [--container <name>]");
+    eprintln!("Usage: eBPF_tracker attach <docker|k8s|aws-eks|aws-ecs> [--backend <inspektor-gadget|tetragon>] [--namespace <ns>] [--selector <label-selector>] [--pod <name>] [--cluster <name>] [--region <aws-region>] [--service <name>] [--task <id>] [--container <name>] [experimental scaffold]");
     eprintln!("Usage: eBPF_tracker demo [--list] [--emit <raw|jsonl>] [--transport <bpftrace|perf>] [--dashboard] [--dashboard-port <port>] [--intelligence-dataset] [--intelligence-provider <lm-studio|openai-compatible>] [--intelligence-model <name>] [example-name]");
     eprintln!("Usage: eBPF_tracker see [--port <port>] [--intelligence-dataset] [--intelligence-provider <lm-studio|openai-compatible>] [--intelligence-model <name>] [example-name]");
     eprintln!("Default emit mode: raw");
@@ -295,6 +300,9 @@ fn print_usage() {
     eprintln!("Repository demo example: eBPF_tracker demo --emit jsonl session-io-demo");
     eprintln!("The see subcommand is a shortcut for the dashboard demo experience.");
     eprintln!("The demo subcommand expects a local clone of cargo-ebpf-tracker.");
+    eprintln!(
+        "The attach subcommand is experimental scaffold/plan mode and does not start tracing yet."
+    );
 }
 
 fn resolve_probe_path(raw_probe: &str) -> String {
@@ -876,281 +884,69 @@ fn resolve_perf_events(
     Ok(perf_trace_expression(&event_kinds))
 }
 
-fn build_tracker_args_for_dashboard(cli_args: &CliArgs) -> Vec<String> {
-    let mut args = Vec::new();
-
-    if let Some(probe_file) = &cli_args.probe_file {
-        args.push("--probe".to_string());
-        args.push(probe_file.clone());
-    }
-
-    if let Some(config_path) = &cli_args.config_path {
-        args.push("--config".to_string());
-        args.push(config_path.display().to_string());
-    }
-
-    args.push("--log-enable".to_string());
-
-    args.push("--emit".to_string());
-    args.push(EmitMode::Jsonl.as_str().to_string());
-    args.push("--transport".to_string());
-    args.push(cli_args.transport_mode.as_str().to_string());
-    args.push("--runtime".to_string());
-    args.push(cli_args.runtime_selection.as_str().to_string());
-    append_intelligence_args(&mut args, &cli_args.intelligence);
-    args.push("--".to_string());
-    args.extend(cli_args.command.iter().cloned());
-
-    args
-}
-
-fn build_demo_args_for_dashboard(demo_args: &DemoArgs) -> Vec<String> {
-    let mut args = vec![
-        "demo".to_string(),
-        "--log-enable".to_string(),
-        "--emit".to_string(),
-        EmitMode::Jsonl.as_str().to_string(),
-        "--transport".to_string(),
-        demo_args.transport_mode.as_str().to_string(),
-    ];
-
-    if demo_args.list_examples {
-        args.push("--list".to_string());
-    }
-
-    if let Some(example_name) = &demo_args.example_name {
-        args.push(example_name.clone());
-    }
-
-    append_intelligence_args(&mut args, &demo_args.intelligence);
-
-    args
-}
-
-fn resolve_dashboard_script() -> Result<PathBuf, String> {
-    ebpf_tracker_viewer::viewer_script_path()
-}
-
-fn parse_dashboard_url(line: &str) -> Option<&str> {
-    line.trim()
-        .strip_prefix("live trace viewer on ")
-        .map(str::trim)
-}
-
-fn try_open_browser(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = Command::new("open");
-        command.arg(url);
-        command
-    };
-
-    #[cfg(target_os = "linux")]
-    let mut command = {
-        let mut command = Command::new("xdg-open");
-        command.arg(url);
-        command
-    };
-
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = Command::new("cmd");
-        command.arg("/C").arg("start").arg("").arg(url);
-        command
-    };
-
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|err| format!("failed to launch browser for {url}: {err}"))?;
-
-    Ok(())
-}
-
-fn forward_dashboard_stdout<R: Read>(mut reader: R) -> io::Result<()> {
-    let mut stdout = io::stdout();
-    let mut buffer = [0u8; 16 * 1024];
-
-    loop {
-        let read_bytes = reader.read(&mut buffer)?;
-        if read_bytes == 0 {
-            break;
-        }
-        stdout.write_all(&buffer[..read_bytes])?;
-        stdout.flush()?;
-    }
-
-    Ok(())
-}
-
-fn forward_dashboard_stderr<R: Read>(reader: R) -> io::Result<()> {
-    let mut reader = BufReader::new(reader);
-    let mut stderr = io::stderr();
-    let mut opened = false;
-    let mut buffer = [0u8; 16 * 1024];
-    let mut pending = Vec::new();
-
-    loop {
-        let read_bytes = reader.read(&mut buffer)?;
-        if read_bytes == 0 {
-            break;
-        }
-
-        let chunk = &buffer[..read_bytes];
-        stderr.write_all(chunk)?;
-        stderr.flush()?;
-
-        pending.extend_from_slice(chunk);
-        while let Some(newline_index) = pending.iter().position(|byte| *byte == b'\n') {
-            let line: Vec<u8> = pending.drain(..=newline_index).collect();
-            if !opened {
-                let text = String::from_utf8_lossy(&line);
-                if let Some(url) = parse_dashboard_url(&text) {
-                    if let Err(err) = try_open_browser(url) {
-                        writeln!(stderr, "dashboard ready at {url} ({err})")?;
-                    }
-                    opened = true;
-                }
-            }
-        }
-    }
-
-    if !opened && !pending.is_empty() {
-        let text = String::from_utf8_lossy(&pending);
-        if let Some(url) = parse_dashboard_url(&text) {
-            if let Err(err) = try_open_browser(url) {
-                writeln!(stderr, "dashboard ready at {url} ({err})")?;
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn run_with_dashboard(
-    dashboard: DashboardOptions,
-    tracker_args: Vec<String>,
-    project_dir: &Path,
-    forced_from_emit: EmitMode,
-) -> Result<i32, String> {
-    let dashboard_script = resolve_dashboard_script()?;
-    let current_exe =
-        env::current_exe().map_err(|err| format!("failed to resolve executable path: {err}"))?;
-
-    if forced_from_emit != EmitMode::Jsonl {
-        eprintln!("dashboard mode forces --emit jsonl for the viewer stream");
-    }
-
-    let mut child = Command::new("node")
-        .arg(&dashboard_script)
-        .arg("--port")
-        .arg(dashboard.port.to_string())
-        .arg("--")
-        .arg(&current_exe)
-        .args(tracker_args)
-        .current_dir(project_dir)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .envs(
-            io::stdin()
-                .is_terminal()
-                .then_some([(INTERACTIVE_PTY_ENV_NAME, "1")])
-                .into_iter()
-                .flatten(),
-        )
-        .spawn()
-        .map_err(|err| {
-            format!(
-                "failed to start dashboard viewer via node {}: {err}",
-                dashboard_script.display()
-            )
-        })?;
-
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "failed to capture dashboard stdout".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "failed to capture dashboard stderr".to_string())?;
-
-    let out_handle = thread::spawn(move || forward_dashboard_stdout(stdout));
-    let err_handle = thread::spawn(move || forward_dashboard_stderr(stderr));
-
-    let status = child
-        .wait()
-        .map_err(|err| format!("failed waiting for dashboard viewer: {err}"))?;
-
-    let out_result = out_handle
-        .join()
-        .map_err(|_| "dashboard stdout forwarding thread panicked".to_string())?;
-    out_result.map_err(|err| format!("dashboard stdout forwarding failed: {err}"))?;
-
-    let err_result = err_handle
-        .join()
-        .map_err(|_| "dashboard stderr forwarding thread panicked".to_string())?;
-    err_result.map_err(|err| format!("dashboard stderr forwarding failed: {err}"))?;
-
-    Ok(exit_code(&status))
-}
-
-fn build_compose_command(
-    compose_file: &Path,
-    runtime_override_file: Option<&Path>,
-    project_dir: &Path,
+struct ResolvedRunPlan {
     runtime_profile: RuntimeProfile,
-    cli_args: &CliArgs,
-    probe_file: Option<&str>,
-    perf_events: Option<&str>,
-    wrapped_command: &[String],
-) -> Command {
-    let mut command = Command::new("docker");
-    command.arg("compose").arg("-f").arg(compose_file);
+    runtime_resolution: RuntimeAssetResolution,
+    runtime_override: Option<PathBuf>,
+    probe_file: Option<String>,
+    perf_events: Option<String>,
+}
 
-    if let Some(runtime_override_file) = runtime_override_file {
-        command.arg("-f").arg(runtime_override_file);
+impl ResolvedRunPlan {
+    fn resolve(cli_args: &CliArgs, project_dir: &Path) -> Result<Self, String> {
+        let runtime_profile =
+            resolve_runtime_profile(cli_args.runtime_selection, &cli_args.command);
+        let config = resolve_tracker_config(cli_args.config_path.as_deref(), project_dir)?;
+        let runtime_resolution = resolve_compose_file_with_source(runtime_profile)?;
+        let runtime_override =
+            resolve_runtime_override(config.as_ref(), &runtime_resolution.compose_file)?;
+        let (probe_file, perf_events) = match cli_args.transport_mode {
+            TransportMode::Bpftrace => (
+                Some(resolve_probe_file(
+                    cli_args,
+                    config.as_ref(),
+                    &runtime_resolution.compose_file,
+                )?),
+                None,
+            ),
+            TransportMode::Perf => (None, Some(resolve_perf_events(cli_args, config.as_ref())?)),
+        };
+
+        Ok(Self {
+            runtime_profile,
+            runtime_resolution,
+            runtime_override,
+            probe_file,
+            perf_events,
+        })
     }
 
-    command.arg("run").arg("--build").arg("--rm");
-
-    command.arg("-e").arg(format!(
-        "EBPF_TRACKER_TRANSPORT={}",
-        cli_args.transport_mode.as_str()
-    ));
-    configure_runtime_command(&mut command, project_dir, runtime_profile);
-
-    if let Some(probe_file) = probe_file {
-        command
-            .arg("-e")
-            .arg(format!("EBPF_TRACKER_PROBE={probe_file}"));
+    fn build_command(&self, cli_args: &CliArgs, project_dir: &Path) -> Command {
+        build_compose_command(ComposeRunConfig {
+            compose_file: &self.runtime_resolution.compose_file,
+            runtime_override_file: self.runtime_override.as_deref(),
+            project_dir,
+            runtime_profile: self.runtime_profile,
+            transport_mode: cli_args.transport_mode,
+            extra_env: &cli_args.extra_env,
+            probe_file: self.probe_file.as_deref(),
+            perf_events: self.perf_events.as_deref(),
+            wrapped_command: &cli_args.command,
+        })
     }
 
-    if let Some(perf_events) = perf_events {
-        command
-            .arg("-e")
-            .arg(format!("EBPF_TRACKER_PERF_EVENTS={perf_events}"));
+    fn maybe_report_runtime_assets(&self) {
+        if should_report_runtime_resolution(&self.runtime_resolution.source) {
+            eprintln!("runtime assets: {}", self.runtime_resolution.description());
+        }
     }
+}
 
-    if interactive_pty_enabled() {
-        command
-            .arg("-e")
-            .arg(format!("{INTERACTIVE_PTY_ENV_NAME}=1"));
-    }
-
-    for (key, value) in &cli_args.extra_env {
-        command.arg("-e").arg(format!("{key}={value}"));
-    }
-
-    command
-        .arg("bpftrace")
-        .args(wrapped_command)
-        .env("PROJECT_DIR", project_dir);
-
-    command
+fn should_report_runtime_resolution(source: &RuntimeAssetSource) -> bool {
+    matches!(
+        source,
+        RuntimeAssetSource::EnvironmentOverride(_) | RuntimeAssetSource::EmbeddedRuntime { .. }
+    )
 }
 
 fn timestamp_for_filename() -> String {
@@ -1890,31 +1686,9 @@ fn run_demo(demo_args: DemoArgs) -> Result<i32, String> {
 }
 
 fn run_cli(cli_args: CliArgs, project_dir: PathBuf) -> Result<i32, String> {
-    let runtime_profile = resolve_runtime_profile(cli_args.runtime_selection, &cli_args.command);
-    let config = resolve_tracker_config(cli_args.config_path.as_deref(), &project_dir)?;
-    let compose_file = resolve_compose_file(runtime_profile)?;
-    let runtime_override = resolve_runtime_override(config.as_ref(), &compose_file)?;
-    let (probe_file, perf_events) = match cli_args.transport_mode {
-        TransportMode::Bpftrace => (
-            Some(resolve_probe_file(
-                &cli_args,
-                config.as_ref(),
-                &compose_file,
-            )?),
-            None,
-        ),
-        TransportMode::Perf => (None, Some(resolve_perf_events(&cli_args, config.as_ref())?)),
-    };
-    let command = build_compose_command(
-        &compose_file,
-        runtime_override.as_deref(),
-        &project_dir,
-        runtime_profile,
-        &cli_args,
-        probe_file.as_deref(),
-        perf_events.as_deref(),
-        &cli_args.command,
-    );
+    let run_plan = ResolvedRunPlan::resolve(&cli_args, &project_dir)?;
+    run_plan.maybe_report_runtime_assets();
+    let command = run_plan.build_command(&cli_args, &project_dir);
 
     if cli_args.emit_mode == EmitMode::Jsonl {
         run_with_jsonl(
@@ -1997,11 +1771,13 @@ mod tests {
     use super::{
         build_demo_args_for_dashboard, build_generated_probe, build_runtime_override,
         build_tracker_args_for_dashboard, load_config, load_demo_manifest, parse_args,
-        parse_dashboard_url, repo_root_from, stream_record_for_bytes, DashboardOptions, EmitMode,
-        IntelligenceOptions, ParseOutcome, RuntimeConfig, TransportMode, DEFAULT_DASHBOARD_PORT,
+        repo_root_from, should_report_runtime_resolution, stream_record_for_bytes, CliArgs,
+        DashboardOptions, EmitMode, IntelligenceOptions, ParseOutcome, ResolvedRunPlan,
+        RuntimeConfig, TransportMode, DEFAULT_DASHBOARD_PORT,
     };
     use crate::attach::{AttachBackend, AttachPlatform};
-    use crate::runtime::RuntimeSelection;
+    use crate::dashboard::parse_dashboard_url;
+    use crate::runtime::{RuntimeAssetSource, RuntimeSelection};
     use ebpf_tracker_events::StreamRecord;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -2519,6 +2295,74 @@ mod tests {
             }
             _ => panic!("expected syscall record"),
         }
+    }
+
+    #[test]
+    fn runtime_resolution_reporting_is_limited_to_non_default_sources() {
+        assert!(should_report_runtime_resolution(
+            &RuntimeAssetSource::EnvironmentOverride(PathBuf::from("/tmp/custom.yml"))
+        ));
+        assert!(should_report_runtime_resolution(
+            &RuntimeAssetSource::EmbeddedRuntime {
+                cache_root: PathBuf::from("/tmp/cache")
+            }
+        ));
+        assert!(!should_report_runtime_resolution(
+            &RuntimeAssetSource::CurrentDir(PathBuf::from("/tmp/project/docker-compose.yml"))
+        ));
+        assert!(!should_report_runtime_resolution(
+            &RuntimeAssetSource::ExecutableAncestor(PathBuf::from("/tmp/bin/docker-compose.yml"))
+        ));
+    }
+
+    #[test]
+    fn resolved_run_plan_uses_environment_override_source() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let temp_dir = Path::new("/tmp").join(format!("ebpf-run-plan-{unique}"));
+        fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+        let compose_file = temp_dir.join("docker-compose.bpftrace.yml");
+        fs::write(
+            &compose_file,
+            "services:\n  bpftrace:\n    image: example\n",
+        )
+        .expect("compose file should be written");
+
+        let original_compose = std::env::var_os("EBPF_TRACKER_COMPOSE_FILE");
+        std::env::set_var("EBPF_TRACKER_COMPOSE_FILE", &compose_file);
+
+        let run_plan = ResolvedRunPlan::resolve(
+            &CliArgs {
+                probe_file: None,
+                config_path: None,
+                log_enable: false,
+                emit_mode: EmitMode::Raw,
+                transport_mode: TransportMode::Bpftrace,
+                runtime_selection: RuntimeSelection::Rust,
+                dashboard: DashboardOptions::default(),
+                intelligence: IntelligenceOptions::default(),
+                command: vec!["cargo".to_string(), "run".to_string()],
+                session_record: None,
+                extra_env: Vec::new(),
+            },
+            &temp_dir,
+        )
+        .expect("run plan should resolve");
+
+        assert_eq!(
+            run_plan.runtime_resolution.source,
+            RuntimeAssetSource::EnvironmentOverride(compose_file.clone())
+        );
+        assert_eq!(run_plan.runtime_resolution.compose_file, compose_file);
+
+        if let Some(original_compose) = original_compose {
+            std::env::set_var("EBPF_TRACKER_COMPOSE_FILE", original_compose);
+        } else {
+            std::env::remove_var("EBPF_TRACKER_COMPOSE_FILE");
+        }
+        let _ = fs::remove_dir_all(temp_dir);
     }
 
     fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {

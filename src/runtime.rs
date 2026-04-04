@@ -37,6 +37,44 @@ pub(crate) enum RuntimeProfile {
     Node,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RuntimeAssetSource {
+    EnvironmentOverride(PathBuf),
+    CurrentDir(PathBuf),
+    ExecutableAncestor(PathBuf),
+    EmbeddedRuntime { cache_root: PathBuf },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RuntimeAssetResolution {
+    pub compose_file: PathBuf,
+    pub source: RuntimeAssetSource,
+}
+
+impl RuntimeAssetResolution {
+    #[allow(dead_code)]
+    pub(crate) fn description(&self) -> String {
+        match &self.source {
+            RuntimeAssetSource::EnvironmentOverride(path) => {
+                format!(
+                    "compose file from EBPF_TRACKER_COMPOSE_FILE: {}",
+                    path.display()
+                )
+            }
+            RuntimeAssetSource::CurrentDir(path) => {
+                format!("compose file from current dir: {}", path.display())
+            }
+            RuntimeAssetSource::ExecutableAncestor(path) => {
+                format!("compose file from executable ancestor: {}", path.display())
+            }
+            RuntimeAssetSource::EmbeddedRuntime { cache_root } => format!(
+                "compose file materialized into embedded runtime cache root: {}",
+                cache_root.display()
+            ),
+        }
+    }
+}
+
 pub(crate) fn parse_runtime_selection(raw: &str) -> Result<RuntimeSelection, String> {
     match raw {
         "auto" => Ok(RuntimeSelection::Auto),
@@ -57,11 +95,16 @@ pub(crate) fn resolve_runtime_profile(
     }
 }
 
-pub(crate) fn resolve_compose_file(profile: RuntimeProfile) -> Result<PathBuf, String> {
+pub(crate) fn resolve_compose_file_with_source(
+    profile: RuntimeProfile,
+) -> Result<RuntimeAssetResolution, String> {
     if let Ok(path) = env::var("EBPF_TRACKER_COMPOSE_FILE") {
         let compose = PathBuf::from(path);
         if compose.is_file() {
-            return Ok(compose);
+            return Ok(RuntimeAssetResolution {
+                compose_file: compose.clone(),
+                source: RuntimeAssetSource::EnvironmentOverride(compose),
+            });
         }
         return Err(format!(
             "compose file from EBPF_TRACKER_COMPOSE_FILE not found: {}",
@@ -71,25 +114,64 @@ pub(crate) fn resolve_compose_file(profile: RuntimeProfile) -> Result<PathBuf, S
 
     let current_dir =
         env::current_dir().map_err(|err| format!("failed to read current dir: {err}"))?;
-    for candidate_name in compose_file_candidates(profile) {
-        let candidate = current_dir.join(candidate_name);
-        if candidate.is_file() {
-            return Ok(candidate);
-        }
-    }
-
     let exe =
         env::current_exe().map_err(|err| format!("failed to resolve executable path: {err}"))?;
-    for ancestor in exe.ancestors() {
-        for candidate_name in compose_file_candidates(profile) {
-            let candidate = ancestor.join(candidate_name);
-            if candidate.is_file() {
-                return Ok(candidate);
-            }
+    resolve_compose_file_from_context(profile, None, &current_dir, &exe, cache_root_candidates())
+}
+
+fn resolve_compose_file_from_context(
+    profile: RuntimeProfile,
+    env_compose_file: Option<&Path>,
+    current_dir: &Path,
+    current_exe: &Path,
+    cache_roots: Vec<PathBuf>,
+) -> Result<RuntimeAssetResolution, String> {
+    if let Some(path) = env_compose_file {
+        if path.is_file() {
+            let compose = path.to_path_buf();
+            return Ok(RuntimeAssetResolution {
+                compose_file: compose.clone(),
+                source: RuntimeAssetSource::EnvironmentOverride(compose),
+            });
         }
+        return Err(format!(
+            "compose file from EBPF_TRACKER_COMPOSE_FILE not found: {}",
+            path.display()
+        ));
     }
 
-    ensure_embedded_runtime(profile)
+    if let Some(resolution) = resolve_compose_file_in_dir(profile, current_dir) {
+        return Ok(RuntimeAssetResolution {
+            compose_file: resolution.clone(),
+            source: RuntimeAssetSource::CurrentDir(resolution),
+        });
+    }
+
+    if let Some(resolution) = resolve_compose_file_in_ancestors(profile, current_exe) {
+        return Ok(RuntimeAssetResolution {
+            compose_file: resolution.clone(),
+            source: RuntimeAssetSource::ExecutableAncestor(resolution),
+        });
+    }
+
+    ensure_embedded_runtime(profile, cache_roots)
+}
+
+fn resolve_compose_file_in_dir(profile: RuntimeProfile, dir: &Path) -> Option<PathBuf> {
+    compose_file_candidates(profile)
+        .iter()
+        .map(|candidate_name| dir.join(candidate_name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn resolve_compose_file_in_ancestors(profile: RuntimeProfile, path: &Path) -> Option<PathBuf> {
+    path.ancestors()
+        .flat_map(|ancestor| {
+            compose_file_candidates(profile)
+                .iter()
+                .map(move |candidate_name| ancestor.join(candidate_name))
+        })
+        .find(|candidate| candidate.is_file())
 }
 
 pub(crate) fn configure_runtime_command(
@@ -158,10 +240,13 @@ fn compose_file_candidates(profile: RuntimeProfile) -> &'static [&'static str] {
     }
 }
 
-fn ensure_embedded_runtime(profile: RuntimeProfile) -> Result<PathBuf, String> {
+fn ensure_embedded_runtime(
+    profile: RuntimeProfile,
+    cache_roots: Vec<PathBuf>,
+) -> Result<RuntimeAssetResolution, String> {
     let mut errors = Vec::new();
 
-    for root in cache_root_candidates() {
+    for root in cache_roots {
         let runtime_dir = root.join(format!(
             "{GENERATED_RUNTIME_ROOT_PREFIX}{}",
             env!("CARGO_PKG_VERSION")
@@ -172,7 +257,12 @@ fn ensure_embedded_runtime(profile: RuntimeProfile) -> Result<PathBuf, String> {
         })();
 
         match result {
-            Ok(compose_file) => return Ok(compose_file),
+            Ok(compose_file) => {
+                return Ok(RuntimeAssetResolution {
+                    compose_file,
+                    source: RuntimeAssetSource::EmbeddedRuntime { cache_root: root },
+                })
+            }
             Err(err) => errors.push(err),
         }
     }
@@ -264,9 +354,12 @@ fn project_dir_hash(project_dir: &Path) -> u64 {
 mod tests {
     use super::{
         container_cargo_target_dir, container_npm_cache_dir, parse_runtime_selection,
-        resolve_runtime_profile, RuntimeProfile, RuntimeSelection,
+        resolve_compose_file_from_context, resolve_runtime_profile, RuntimeAssetSource,
+        RuntimeProfile, RuntimeSelection,
     };
+    use std::fs;
     use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn runtime_selection_parser_accepts_supported_values() {
@@ -362,5 +455,190 @@ mod tests {
             container_npm_cache_dir(first),
             container_npm_cache_dir(second)
         );
+    }
+
+    #[test]
+    fn compose_file_resolution_prefers_current_dir_over_executable_ancestors() {
+        let temp_root = unique_temp_dir("runtime-current-dir");
+        let current_dir = temp_root.join("project");
+        let exe_dir = temp_root.join("bin");
+        fs::create_dir_all(&current_dir).expect("current dir should be created");
+        fs::create_dir_all(&exe_dir).expect("exe dir should be created");
+
+        let compose_name = super::compose_file_name(RuntimeProfile::Rust);
+        let current_compose = current_dir.join(compose_name);
+        let exe_compose = temp_root.join(compose_name);
+        fs::write(&current_compose, "current").expect("current compose should be written");
+        fs::write(&exe_compose, "exe").expect("exe compose should be written");
+
+        let resolution = resolve_compose_file_from_context(
+            RuntimeProfile::Rust,
+            None,
+            &current_dir,
+            &exe_dir.join("tracker"),
+            vec![temp_root.join("cache")],
+        )
+        .expect("resolution should succeed");
+
+        assert_eq!(resolution.compose_file, current_compose);
+        assert_eq!(
+            resolution.source,
+            RuntimeAssetSource::CurrentDir(current_compose)
+        );
+        assert!(resolution.description().contains("current dir"));
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn compose_file_resolution_falls_back_to_embedded_runtime_in_first_working_cache_root() {
+        let temp_root = unique_temp_dir("runtime-embedded");
+        let blocked_root = temp_root.join("blocked-root");
+        let cache_root = temp_root.join("cache-root");
+        fs::create_dir_all(&temp_root).expect("temp root should be created");
+        fs::write(&blocked_root, "blocked").expect("blocked root file should be written");
+
+        let resolution = resolve_compose_file_from_context(
+            RuntimeProfile::Node,
+            None,
+            &temp_root.join("workspace"),
+            &temp_root.join("workspace").join("bin").join("tracker"),
+            vec![blocked_root.clone(), cache_root.clone()],
+        )
+        .expect("resolution should succeed");
+
+        let expected_runtime_root = cache_root.join(format!(
+            "{}{}",
+            super::GENERATED_RUNTIME_ROOT_PREFIX,
+            env!("CARGO_PKG_VERSION")
+        ));
+        assert!(matches!(
+            resolution.source,
+            RuntimeAssetSource::EmbeddedRuntime { .. }
+        ));
+        assert_eq!(
+            resolution.compose_file,
+            expected_runtime_root.join(super::NODE_COMPOSE_FILE_NAME)
+        );
+        if let RuntimeAssetSource::EmbeddedRuntime {
+            cache_root: ref selected_cache_root,
+        } = resolution.source
+        {
+            assert_eq!(selected_cache_root.as_path(), cache_root.as_path());
+        } else {
+            panic!("expected embedded runtime source");
+        }
+        assert!(resolution
+            .description()
+            .contains("embedded runtime cache root"));
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn compose_file_resolution_prefers_environment_override() {
+        let temp_root = unique_temp_dir("runtime-env");
+        fs::create_dir_all(&temp_root).expect("temp root should be created");
+        let compose = temp_root.join("custom-compose.yml");
+        fs::write(&compose, "custom").expect("compose should be written");
+
+        let resolution = resolve_compose_file_from_context(
+            RuntimeProfile::Rust,
+            Some(compose.as_path()),
+            &temp_root.join("project"),
+            &temp_root.join("exe"),
+            vec![temp_root.join("cache")],
+        )
+        .expect("resolution should succeed");
+
+        assert_eq!(resolution.compose_file, compose);
+        assert_eq!(
+            resolution.source,
+            RuntimeAssetSource::EnvironmentOverride(compose.clone())
+        );
+        assert!(resolution
+            .description()
+            .contains("EBPF_TRACKER_COMPOSE_FILE"));
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn compose_file_resolution_reports_executable_ancestor_when_current_dir_has_no_match() {
+        let temp_root = unique_temp_dir("runtime-exe");
+        let current_dir = temp_root.join("project");
+        let exe_parent = temp_root.join("ancestor");
+        let exe = exe_parent.join("bin").join("tracker");
+        fs::create_dir_all(&current_dir).expect("current dir should be created");
+        fs::create_dir_all(&exe_parent).expect("exe parent should be created");
+        fs::create_dir_all(exe.parent().expect("exe parent should exist"))
+            .expect("exe bin dir should be created");
+
+        let compose_name = super::compose_file_name(RuntimeProfile::Rust);
+        let ancestor_compose = exe_parent.join(compose_name);
+        fs::write(&ancestor_compose, "ancestor").expect("ancestor compose should be written");
+
+        let resolution = resolve_compose_file_from_context(
+            RuntimeProfile::Rust,
+            None,
+            &current_dir,
+            &exe,
+            vec![temp_root.join("cache")],
+        )
+        .expect("resolution should succeed");
+
+        assert_eq!(resolution.compose_file, ancestor_compose);
+        assert_eq!(
+            resolution.source,
+            RuntimeAssetSource::ExecutableAncestor(ancestor_compose)
+        );
+        assert!(resolution.description().contains("executable ancestor"));
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    #[test]
+    fn compose_file_resolution_is_deterministic_across_candidate_roots() {
+        let temp_root = unique_temp_dir("runtime-deterministic");
+        let blocked_root = temp_root.join("blocked");
+        let working_root = temp_root.join("working");
+        fs::create_dir_all(&temp_root).expect("temp root should be created");
+        fs::write(&blocked_root, "blocked").expect("blocked root file should be written");
+        fs::create_dir_all(&working_root).expect("working root should be created");
+
+        let resolution = resolve_compose_file_from_context(
+            RuntimeProfile::Rust,
+            None,
+            &temp_root.join("project"),
+            &temp_root.join("exe"),
+            vec![blocked_root.clone(), working_root.clone()],
+        )
+        .expect("resolution should succeed");
+
+        let expected_root = working_root.join(format!(
+            "{}{}",
+            super::GENERATED_RUNTIME_ROOT_PREFIX,
+            env!("CARGO_PKG_VERSION")
+        ));
+        assert_eq!(
+            resolution.source,
+            RuntimeAssetSource::EmbeddedRuntime {
+                cache_root: working_root
+            }
+        );
+        assert_eq!(
+            resolution.compose_file,
+            expected_root.join(super::DEFAULT_COMPOSE_FILE_NAME)
+        );
+
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        Path::new("/tmp").join(format!("{prefix}-{unique}"))
     }
 }
