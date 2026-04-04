@@ -7,7 +7,8 @@ const { spawn } = require("child_process");
 
 const DEFAULT_PORT = 43115;
 const DEFAULT_HOST = "127.0.0.1";
-const DEFAULT_TARGET = ["./target/debug/ebpf-tracker", "demo", "session-io-demo"];
+const USER_FACING_TARGET = ["ebpf-tracker", "demo", "session-io-demo"];
+const REPO_FALLBACK_TARGET = ["./target/debug/ebpf-tracker", "demo", "session-io-demo"];
 const MAX_PORT_RETRIES = 16;
 const BUNDLED_REPLAYS = [
   {
@@ -176,17 +177,45 @@ function parseArgs(args) {
 }
 
 function ensureViewerCommand(command) {
-  const finalCommand = command.length ? command.slice() : DEFAULT_TARGET.slice();
+  const finalCommand = command.length ? command.slice() : defaultViewerTarget();
 
   if (isTrackerBinary(finalCommand[0])) {
     return [finalCommand[0], ...ensureTrackerArgsJsonl(finalCommand.slice(1))];
   }
 
   if (finalCommand[0] === "demo") {
-    return [DEFAULT_TARGET[0], ...ensureTrackerArgsJsonl(finalCommand)];
+    return [resolveTrackerBinary(), ...ensureTrackerArgsJsonl(finalCommand)];
   }
 
-  return [DEFAULT_TARGET[0], ...ensureTrackerArgsJsonl(finalCommand)];
+  return [resolveTrackerBinary(), ...ensureTrackerArgsJsonl(finalCommand)];
+}
+
+function defaultViewerTarget() {
+  return [resolveTrackerBinary(), "demo", "session-io-demo"];
+}
+
+function resolveTrackerBinary() {
+  if (commandExistsOnPath(USER_FACING_TARGET[0])) {
+    return USER_FACING_TARGET[0];
+  }
+  return REPO_FALLBACK_TARGET[0];
+}
+
+function commandExistsOnPath(command) {
+  const pathValue = process.env.PATH || "";
+  const pathEntries = pathValue.split(path.delimiter).filter(Boolean);
+
+  for (const entry of pathEntries) {
+    const candidate = path.join(entry, command);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return true;
+    } catch {
+      // Ignore missing or non-executable candidates.
+    }
+  }
+
+  return false;
 }
 
 function ensureTrackerArgsJsonl(args) {
@@ -1409,7 +1438,7 @@ function renderHtml() {
       main {
         position: relative;
         z-index: 1;
-        max-width: 1500px;
+        max-width: 1620px;
         margin: 0 auto;
         padding: 18px 18px 32px;
         width: 100%;
@@ -1418,7 +1447,7 @@ function renderHtml() {
       .hero {
         display: grid;
         gap: 16px;
-        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+        grid-template-columns: minmax(0, 1.34fr) minmax(300px, 0.66fr);
         margin-bottom: 16px;
         align-items: start;
       }
@@ -1432,7 +1461,9 @@ function renderHtml() {
       }
 
       .hero-copy {
-        padding: 22px 24px;
+        display: grid;
+        gap: 16px;
+        padding: 20px 22px;
         min-width: 0;
       }
 
@@ -1446,13 +1477,13 @@ function renderHtml() {
 
       .brand-banner {
         display: grid;
-        gap: 12px;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        margin: 0 0 18px;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        margin: 0;
       }
 
       .brand-card {
-        padding: 14px 16px;
+        padding: 12px 14px;
         border-radius: 18px;
         background: linear-gradient(135deg, rgba(114,182,255,0.18), rgba(60,255,20,0.1));
         border: 1px solid rgba(114,182,255,0.24);
@@ -1470,14 +1501,15 @@ function renderHtml() {
 
       .brand-card strong {
         display: block;
-        font-size: 1.25rem;
+        font-size: 1.1rem;
         line-height: 1.1;
         overflow-wrap: anywhere;
       }
 
       .brand-card p {
-        margin: 8px 0 0;
+        margin: 6px 0 0;
         color: var(--muted);
+        font-size: 0.96rem;
       }
 
       .brand-card a {
@@ -1487,13 +1519,13 @@ function renderHtml() {
 
       .story-rail {
         display: grid;
-        gap: 12px;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        margin: 18px 0 0;
+        gap: 10px;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        margin: 0;
       }
 
       .story-card {
-        padding: 14px 16px;
+        padding: 12px 14px;
         border-radius: 18px;
         background: rgba(8, 14, 24, 0.78);
         border: 1px solid rgba(123,255,185,0.16);
@@ -1511,34 +1543,64 @@ function renderHtml() {
 
       .story-card strong {
         display: block;
-        font-size: 1.02rem;
+        font-size: 0.98rem;
         line-height: 1.15;
         overflow-wrap: anywhere;
       }
 
       .story-card p {
-        margin: 8px 0 0;
+        margin: 6px 0 0;
         color: var(--muted);
+        font-size: 0.94rem;
       }
 
       h1 {
-        margin: 0 0 10px;
-        font-size: clamp(2.6rem, 5vw, 4.8rem);
-        line-height: 0.9;
+        margin: 0;
+        max-width: 12ch;
+        font-size: clamp(2.25rem, 3.8vw, 3.5rem);
+        line-height: 0.94;
       }
 
       .lede {
         margin: 0;
-        max-width: 44rem;
+        max-width: 42rem;
         color: var(--muted);
+        font-size: 0.98rem;
+        line-height: 1.55;
       }
 
       .status-box {
-        padding: 22px 24px;
+        position: sticky;
+        top: 18px;
+        padding: 20px;
         display: grid;
-        gap: 12px;
+        gap: 14px;
         align-content: start;
         min-width: 0;
+      }
+
+      .status-meta {
+        display: grid;
+        gap: 12px 14px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .status-field {
+        min-width: 0;
+      }
+
+      .status-field.wide {
+        grid-column: 1 / -1;
+      }
+
+      .status-field strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .status-detail {
+        display: grid;
+        gap: 8px;
       }
 
       .status-box > div {
@@ -1562,8 +1624,20 @@ function renderHtml() {
         text-transform: uppercase;
       }
 
+      .status-chip.is-warning {
+        background: rgba(255,216,77,0.12);
+        border-color: rgba(255,216,77,0.22);
+        color: var(--amber);
+      }
+
+      .status-chip.is-error {
+        background: rgba(255,95,122,0.14);
+        border-color: rgba(255,95,122,0.22);
+        color: var(--red);
+      }
+
       .transport-deck {
-        margin-top: 6px;
+        margin-top: 0;
         padding: 14px;
         border-radius: 18px;
         background:
@@ -1573,6 +1647,13 @@ function renderHtml() {
         min-width: 0;
       }
 
+      .transport-deck,
+      .library-box,
+      .intelligence-box {
+        backdrop-filter: blur(10px);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
+      }
+
       .transport-deck.disabled {
         opacity: 0.58;
       }
@@ -1580,16 +1661,20 @@ function renderHtml() {
       .library-box {
         display: grid;
         gap: 10px;
-        margin-top: 6px;
-        padding-top: 14px;
-        border-top: 1px solid rgba(60, 255, 20, 0.12);
+        margin-top: 0;
+        padding: 16px;
+        border-radius: 18px;
+        background:
+          linear-gradient(180deg, rgba(60,255,20,0.05), rgba(255,255,255,0.02)),
+          rgba(0,0,0,0.2);
+        border: 1px solid rgba(60, 255, 20, 0.14);
         min-width: 0;
       }
 
       .intelligence-box {
         display: grid;
         gap: 8px;
-        margin-top: 6px;
+        margin-top: 0;
         padding: 14px;
         border-radius: 18px;
         background:
@@ -1686,7 +1771,7 @@ function renderHtml() {
 
       .transport-buttons {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
       }
 
@@ -1723,7 +1808,7 @@ function renderHtml() {
         position: relative;
         display: grid;
         justify-items: center;
-        gap: 8px;
+        gap: 10px;
         padding: 8px 6px 2px;
         border-radius: 16px;
         background: rgba(0,0,0,0.14);
@@ -1731,14 +1816,49 @@ function renderHtml() {
       }
 
       .knob-input {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
+        width: 100%;
+        margin: 0;
+        appearance: none;
+        background: transparent;
         cursor: pointer;
       }
 
       .knob-input:disabled {
         cursor: not-allowed;
+      }
+
+      .knob-input::-webkit-slider-runnable-track {
+        height: 8px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(60,255,20,0.12), rgba(114,182,255,0.5));
+        border: 1px solid rgba(255,255,255,0.08);
+      }
+
+      .knob-input::-webkit-slider-thumb {
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        margin-top: -6px;
+        border-radius: 50%;
+        border: 1px solid rgba(233,255,237,0.85);
+        background: radial-gradient(circle at 30% 30%, #fff, var(--green));
+        box-shadow: 0 0 12px rgba(60,255,20,0.35);
+      }
+
+      .knob-input::-moz-range-track {
+        height: 8px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(60,255,20,0.12), rgba(114,182,255,0.5));
+        border: 1px solid rgba(255,255,255,0.08);
+      }
+
+      .knob-input::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1px solid rgba(233,255,237,0.85);
+        background: radial-gradient(circle at 30% 30%, #fff, var(--green));
+        box-shadow: 0 0 12px rgba(60,255,20,0.35);
       }
 
       .knob-dial {
@@ -1794,12 +1914,18 @@ function renderHtml() {
         display: grid;
         gap: 12px;
         grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        margin-bottom: 16px;
+        margin: 0;
       }
 
       .metric {
-        padding: 16px;
+        padding: 14px;
         min-width: 0;
+      }
+
+      .metrics .panel {
+        background: rgba(8, 14, 24, 0.8);
+        backdrop-filter: none;
+        box-shadow: none;
       }
 
       .metric .label {
@@ -1863,7 +1989,7 @@ function renderHtml() {
       }
 
       .code-rain {
-        height: 300px;
+        height: 240px;
         border-radius: 18px;
         background:
           linear-gradient(180deg, rgba(60,255,20,0.04), rgba(60,255,20,0.01)),
@@ -1885,6 +2011,18 @@ function renderHtml() {
       .rain-line.connect { color: var(--blue); }
       .rain-line.write { color: #9dff6d; }
       .rain-line.aggregate { color: #ff8ca1; }
+
+      .connection-state.is-connected {
+        color: var(--green);
+      }
+
+      .connection-state.is-reconnecting {
+        color: var(--amber);
+      }
+
+      .connection-state.is-disconnected {
+        color: var(--red);
+      }
 
       .list {
         display: grid;
@@ -1967,7 +2105,7 @@ function renderHtml() {
 
       pre {
         margin: 0;
-        max-height: 200px;
+        max-height: 160px;
         overflow: auto;
         padding: 14px;
         border-radius: 16px;
@@ -2001,6 +2139,10 @@ function renderHtml() {
         .hero, .layout {
           grid-template-columns: 1fr;
         }
+
+        .status-box {
+          position: static;
+        }
       }
 
       @media (max-width: 720px) {
@@ -2023,7 +2165,7 @@ function renderHtml() {
         }
 
         .transport-buttons {
-          grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
         .knob-row {
@@ -2034,6 +2176,10 @@ function renderHtml() {
           grid-template-columns: 1fr;
           gap: 6px;
           align-items: start;
+        }
+
+        .status-meta {
+          grid-template-columns: 1fr;
         }
 
         .transport-head,
@@ -2049,6 +2195,11 @@ function renderHtml() {
       <section class="hero">
         <div class="panel hero-copy">
           <p class="eyebrow">Live eBPF stream</p>
+          <h1>Session control room.</h1>
+          <p class="lede">
+            Keep the traced workload, its inputs, and its output artifacts on screen. Wrapper and
+            container chatter stay in the background until you need them.
+          </p>
           <div class="brand-banner">
             <div class="brand-card">
               <small>product</small>
@@ -2062,11 +2213,6 @@ function renderHtml() {
               <a id="sponsor-link" href="#" target="_blank" rel="noreferrer" hidden>project link</a>
             </div>
           </div>
-          <h1>Trace the full command session.</h1>
-          <p class="lede">
-            This view is product-first: the demo workload, its inputs, and its outputs stay in the foreground
-            while Docker and toolchain plumbing are pushed into the background unless you need them.
-          </p>
           <div class="story-rail">
             <div class="story-card">
               <small>workload</small>
@@ -2084,23 +2230,49 @@ function renderHtml() {
               <p id="story-outcome-detail">Artifacts and write volume show up here.</p>
             </div>
           </div>
+          <section class="metrics">
+            <article class="panel metric"><span class="label">open_at</span><span class="value" id="metric-open">0</span><span class="hint">file access</span></article>
+            <article class="panel metric"><span class="label">execve</span><span class="value" id="metric-exec">0</span><span class="hint">process boundaries</span></article>
+            <article class="panel metric"><span class="label">connect</span><span class="value" id="metric-connect">0</span><span class="hint">network activity</span></article>
+            <article class="panel metric"><span class="label">write</span><span class="value" id="metric-write">0</span><span class="hint">output churn</span></article>
+            <article class="panel metric"><span class="label">bytes</span><span class="value" id="metric-bytes">0 B</span><span class="hint">write volume</span></article>
+          </section>
         </div>
         <aside class="panel status-box">
           <div class="status-chip" id="status-chip" role="status" aria-live="polite">connecting</div>
-          <div><strong>mode</strong><br><small id="mode-box" aria-live="polite">live</small></div>
-          <div><strong>focus</strong><br><small id="focus-box" aria-live="polite">auto</small></div>
-          <div><strong>progress</strong><br><small id="progress-box" aria-live="polite">0 / 0</small></div>
-          <div><strong>viewer</strong><br><small id="viewer-url" aria-live="polite">waiting for server</small></div>
-          <div><strong>connection</strong><br><small id="connection-box" aria-live="polite">connecting</small></div>
-          <div><strong>command</strong><pre id="command-box">starting...</pre></div>
-          <section class="intelligence-box" id="intelligence-box" hidden>
-            <div class="library-head">
-              <strong>Intelligence</strong>
-              <small id="intelligence-phase">idle</small>
-            </div>
-            <small id="intelligence-detail">dataset worker idle</small>
-            <small id="intelligence-paths"></small>
-            <pre class="intelligence-summary" id="intelligence-summary"></pre>
+          <div class="status-meta">
+            <div class="status-field"><strong>mode</strong><small id="mode-box" aria-live="polite">live</small></div>
+            <div class="status-field"><strong>focus</strong><small id="focus-box" aria-live="polite">auto</small></div>
+            <div class="status-field"><strong>progress</strong><small id="progress-box" aria-live="polite">0 / 0</small></div>
+            <div class="status-field"><strong>connection</strong><small id="connection-box" class="connection-state" aria-live="polite">connecting</small></div>
+            <div class="status-field wide"><strong>viewer</strong><small id="viewer-url" aria-live="polite">waiting for server</small></div>
+          </div>
+          <div class="status-detail">
+            <strong>command</strong>
+            <pre id="command-box">starting...</pre>
+          </div>
+        </aside>
+      </section>
+
+      <section class="layout">
+        <div class="stack">
+          <section class="panel section">
+            <h2>Trace Waterfall</h2>
+            <div class="diagram-shell" id="trace-waterfall"></div>
+          </section>
+          <section class="panel section">
+            <h2>Recent Events</h2>
+            <div class="list" id="recent-events"></div>
+          </section>
+          <section class="panel section">
+            <h2>Signal Feed</h2>
+            <div class="code-rain" id="code-rain"></div>
+          </section>
+        </div>
+        <div class="stack">
+          <section class="panel section">
+            <h2>Session Map</h2>
+            <div class="diagram-shell" id="trace-map"></div>
           </section>
           <section class="transport-deck" id="transport-deck">
             <div class="transport-head">
@@ -2130,43 +2302,14 @@ function renderHtml() {
               </label>
             </div>
           </section>
-          <section class="library-box">
+          <section class="intelligence-box" id="intelligence-box" hidden>
             <div class="library-head">
-              <strong>Review Demos</strong>
-              <small>Bundled fixtures plus repo logs</small>
+              <strong>Intelligence</strong>
+              <small id="intelligence-phase">idle</small>
             </div>
-            <div class="library-list" id="library-list"></div>
-          </section>
-        </aside>
-      </section>
-
-      <section class="metrics">
-        <article class="panel metric"><span class="label">open_at</span><span class="value" id="metric-open">0</span><span class="hint">file access</span></article>
-        <article class="panel metric"><span class="label">execve</span><span class="value" id="metric-exec">0</span><span class="hint">process boundaries</span></article>
-        <article class="panel metric"><span class="label">connect</span><span class="value" id="metric-connect">0</span><span class="hint">network activity</span></article>
-        <article class="panel metric"><span class="label">write</span><span class="value" id="metric-write">0</span><span class="hint">output churn</span></article>
-        <article class="panel metric"><span class="label">bytes</span><span class="value" id="metric-bytes">0 B</span><span class="hint">write volume</span></article>
-      </section>
-
-      <section class="layout">
-        <div class="stack">
-          <section class="panel section">
-            <h2>Trace Waterfall</h2>
-            <div class="diagram-shell" id="trace-waterfall"></div>
-          </section>
-          <section class="panel section">
-            <h2>Live Flood</h2>
-            <div class="code-rain" id="code-rain"></div>
-          </section>
-          <section class="panel section">
-            <h2>Recent Events</h2>
-            <div class="list" id="recent-events"></div>
-          </section>
-        </div>
-        <div class="stack">
-          <section class="panel section">
-            <h2>Session Map</h2>
-            <div class="diagram-shell" id="trace-map"></div>
+            <small id="intelligence-detail">dataset worker idle</small>
+            <small id="intelligence-paths"></small>
+            <pre class="intelligence-summary" id="intelligence-summary"></pre>
           </section>
           <section class="panel section">
             <h2>Processes</h2>
@@ -2179,6 +2322,13 @@ function renderHtml() {
           <section class="panel section">
             <h2>Largest Writes</h2>
             <div class="list" id="write-list"></div>
+          </section>
+          <section class="library-box">
+            <div class="library-head">
+              <strong>Replay Library</strong>
+              <small>Bundled fixtures plus repo logs</small>
+            </div>
+            <div class="library-list" id="library-list"></div>
           </section>
           <section class="panel section">
             <h2>Tracer Stderr</h2>
@@ -2197,6 +2347,8 @@ function renderHtml() {
           detail: "waiting for viewer stream"
         }
       };
+      const reducedMotionQuery = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+      let reduceMotion = Boolean(reducedMotionQuery && reducedMotionQuery.matches);
 
       const els = {
         codeRain: document.getElementById("code-rain"),
@@ -2366,8 +2518,8 @@ function renderHtml() {
         els.write.textContent = formatNumber(snapshot.counters.write);
         els.bytes.textContent = formatBytes(snapshot.counters.bytes);
         applyHeroStory(focusedSnapshot);
-        els.traceWaterfall.innerHTML = renderWaterfall(displayEvents);
-        els.traceMap.innerHTML = renderTraceMap(focusedSnapshot);
+        setMarkup(els.traceWaterfall, renderWaterfall(displayEvents));
+        setMarkup(els.traceMap, renderTraceMap(focusedSnapshot));
         if (snapshot.mode === "replay") {
           state.recentRain = displayEvents.slice(0, 18);
           addRainFrame();
@@ -2379,7 +2531,7 @@ function renderHtml() {
           addRainFrame();
         }
 
-        els.recentEvents.innerHTML = displayEvents.map((event) => {
+        setMarkup(els.recentEvents, displayEvents.map((event) => {
           return '<div class="row">' +
             '<span class="pill ' + escapeClass(event.kind || "other") + '">' + escapeHtml(event.kind || "other") + '</span>' +
             '<div><strong>' + escapeHtml(event.text) + '</strong><small>' +
@@ -2387,18 +2539,18 @@ function renderHtml() {
             '</small></div>' +
             '<small>+' + formatMs(event.since_start_ms || 0) + '</small>' +
           '</div>';
-        }).join("");
+        }).join(""));
 
         const maxProcess = focusedSnapshot.topProcesses[0]?.count || 1;
-        els.processBars.innerHTML = focusedSnapshot.topProcesses.map((entry) => {
+        setMarkup(els.processBars, focusedSnapshot.topProcesses.map((entry) => {
           const width = (entry.count / maxProcess) * 100;
           return '<div class="bar-row">' +
             '<div class="bar-label"><span>' + escapeHtml(entry.comm) + '</span><span>' + formatNumber(entry.count) + '</span></div>' +
             '<div class="bar"><div class="bar-fill" style="width:' + width.toFixed(2) + '%"></div></div>' +
           '</div>';
-        }).join("");
+        }).join(""));
 
-        els.fileList.innerHTML = focusedSnapshot.topFiles.length
+        setMarkup(els.fileList, focusedSnapshot.topFiles.length
           ? focusedSnapshot.topFiles.map((entry) => {
               return '<div class="row">' +
                 '<span class="pill file">file</span>' +
@@ -2406,9 +2558,9 @@ function renderHtml() {
                 '<small></small>' +
               '</div>';
             }).join("")
-          : '<div class="row"><span class="pill file">file</span><div><strong>No app-level files yet.</strong></div><small></small></div>';
+          : '<div class="row"><span class="pill file">file</span><div><strong>No app-level files yet.</strong></div><small></small></div>');
 
-        els.writeList.innerHTML = focusedSnapshot.writes.length
+        setMarkup(els.writeList, focusedSnapshot.writes.length
           ? focusedSnapshot.writes.map((entry) => {
               return '<div class="row">' +
                 '<span class="pill write">write</span>' +
@@ -2416,7 +2568,7 @@ function renderHtml() {
                 '<small>' + new Date(entry.timestamp_unix_ms).toLocaleTimeString() + '</small>' +
               '</div>';
             }).join("")
-          : '<div class="row"><span class="pill write">write</span><div><strong>No app-level writes yet.</strong></div><small></small></div>';
+          : '<div class="row"><span class="pill write">write</span><div><strong>No app-level writes yet.</strong></div><small></small></div>');
       }
 
       function applyBranding(branding) {
@@ -2492,22 +2644,27 @@ function renderHtml() {
       function setConnectionState(status, detail) {
         state.connection.status = status;
         state.connection.detail = detail;
+        els.connectionBox.classList.toggle("is-connected", status === "connected");
+        els.connectionBox.classList.toggle("is-reconnecting", status === "reconnecting");
+        els.connectionBox.classList.toggle("is-disconnected", status === "disconnected");
+        els.statusChip.classList.toggle("is-warning", status === "reconnecting");
+        els.statusChip.classList.toggle("is-error", status === "disconnected");
         els.connectionBox.textContent = detail ? status + " · " + detail : status;
       }
 
       function renderLibrary(entries, activeLibraryId) {
         if (!entries.length) {
-          els.libraryList.innerHTML = '<div class="library-entry"><strong>No replay demos found yet.</strong><small>Run a demo with logging or use the bundled fixtures.</small></div>';
+          setMarkup(els.libraryList, '<div class="library-entry"><strong>No replay demos found yet.</strong><small>Run a demo with logging or use the bundled fixtures.</small></div>');
           return;
         }
 
-        els.libraryList.innerHTML = entries.map((entry) => {
+        setMarkup(els.libraryList, entries.map((entry) => {
           const active = entry.id === activeLibraryId ? " active" : "";
           return '<button class="library-entry' + active + '" type="button" data-library-id="' + escapeHtml(entry.id) + '">' +
             '<strong>' + escapeHtml(entry.title) + '</strong>' +
             '<small>' + escapeHtml(entry.detail) + '</small>' +
           '</button>';
-        }).join("");
+        }).join(""));
       }
 
       function addRainLine(event) {
@@ -2517,13 +2674,13 @@ function renderHtml() {
       }
 
       function addRainFrame() {
-        els.codeRain.innerHTML = state.recentRain.map((entry) => {
+        setMarkup(els.codeRain, state.recentRain.map((entry) => {
           return '<div class="rain-line ' + escapeClass(entry.kind || "other") + '">' +
             escapeHtml(entry.glyph || "?") + ' ' +
             escapeHtml(new Date(entry.timestamp_unix_ms || Date.now()).toISOString()) +
             ' :: ' + escapeHtml(entry.text || "") +
           '</div>';
-        }).join("");
+        }).join(""));
       }
 
       function buildFocusedSnapshot(snapshot) {
@@ -2690,6 +2847,8 @@ function renderHtml() {
 
         const speed = Number(replay?.speed || els.speedKnob.value || 1);
         const stepSize = Number(replay?.stepSize || els.jumpKnob.value || 8);
+        els.speedKnob.setAttribute("aria-valuetext", speed.toFixed(2) + "x");
+        els.jumpKnob.setAttribute("aria-valuetext", stepSize + " events");
         els.speedKnob.value = String(speed);
         els.jumpKnob.value = String(stepSize);
         updateKnob(els.speedKnobWrap, speed, 0.25, 8, (current) => current.toFixed(2) + "x", els.speedReadout);
@@ -3217,6 +3376,12 @@ function renderHtml() {
         return String(value).replace(/[^a-zA-Z0-9_-]/g, "_");
       }
 
+      function setMarkup(node, nextHtml) {
+        if (node && node.innerHTML !== nextHtml) {
+          node.innerHTML = nextHtml;
+        }
+      }
+
       function shortPath(value) {
         const path = String(value || "");
         if (path.length <= 30) return path;
@@ -3302,6 +3467,10 @@ function renderHtml() {
       }
 
       function draw() {
+        if (reduceMotion) {
+          ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+          return;
+        }
         ctx.fillStyle = "rgba(5, 8, 15, 0.12)";
         ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
         ctx.font = "16px IBM Plex Mono, monospace";
@@ -3318,6 +3487,19 @@ function renderHtml() {
           drops[i] += 1 + Math.random() * 0.35;
         }
         requestAnimationFrame(draw);
+      }
+
+      if (reducedMotionQuery) {
+        const syncMotionPreference = (event) => {
+          reduceMotion = Boolean(event.matches);
+          resize();
+          draw();
+        };
+        if (typeof reducedMotionQuery.addEventListener === "function") {
+          reducedMotionQuery.addEventListener("change", syncMotionPreference);
+        } else if (typeof reducedMotionQuery.addListener === "function") {
+          reducedMotionQuery.addListener(syncMotionPreference);
+        }
       }
 
       window.addEventListener("resize", resize);

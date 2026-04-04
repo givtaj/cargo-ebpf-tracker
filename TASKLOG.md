@@ -77,6 +77,7 @@ This file tracks user-requested work and delegated agent tasks in progress on th
 
 ### Product Entry And CLI Ergonomics
 
+- 2026-04-04 | Task: Refresh first-run onboarding copy and viewer layout while clarifying that demo manifests require a checkout or repo-built binary | Owner: Codex | Status: completed | Output: `README.md`, `docs/cli.md`, `examples/README.md`, `src/lib.rs`, `crates/ebpf-tracker-viewer/assets/live-trace-matrix.js`, `CHANGELOG.md`, `TASKLOG.md`
 - 2026-03-29 | Task: Make viewer help discovery side-effect free and align replay docs with the actual Cargo alias invocation | Owner: Codex | Status: completed | Output: `crates/ebpf-tracker-viewer/src/main.rs`, `crates/ebpf-tracker-viewer/README.md`, `README.md`, `examples/README.md`, `examples/session-io-demo/README.md`, `docs/trace-payment-engine.md`, `CHANGELOG.md`, `TASKLOG.md`
 - 2026-03-25 | Task: Add a short CLI action to launch the product demo experience | Owner: Codex | Status: completed | Output: `src/lib.rs`, `.cargo/config.toml`, `README.md`
 

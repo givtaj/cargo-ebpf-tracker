@@ -8,6 +8,11 @@ This file tracks notable repo changes in progress on this branch.
 
 - Switched the tag-driven release workflow to GitHub's current `macos-15-intel` hosted runner label so macOS release builds do not cancel before execution.
 
+### Changed
+
+- Refreshed the root onboarding copy, CLI help, and example docs so installed-binary tracing is separated cleanly from checkout-only `demo` and `see` flows.
+- Reworked the live trace viewer layout and replay controls, including clearer status grouping, replay-library placement, reduced-motion handling, and tracker-binary resolution that can use either `ebpf-tracker` on `PATH` or a repo build.
+
 ## v0.1.0 - 2026-04-04
 
 ### Added

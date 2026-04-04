@@ -107,21 +107,31 @@ The shared JSONL record schema lives in
 
 ## Dashboard, Demo, And See
 
-Repo-local dashboard examples:
+Dashboard commands for tracing your own project:
 
 ```bash
-./target/debug/ebpf-tracker --dashboard cargo run
-./target/debug/ebpf-tracker --dashboard npm run dev
-./target/debug/ebpf-tracker --dashboard node
-./target/debug/ebpf-tracker demo --dashboard session-io-demo
-./target/debug/ebpf-tracker see
+ebpf-tracker --dashboard cargo run
+ebpf-tracker --dashboard npm run dev
+ebpf-tracker --dashboard node
 ```
 
-`see` is a shortcut for the repo-local dashboard demo experience. You can also
-target a specific example:
+`demo` and `see` use the repo's `examples/*/ebpf-demo.toml` manifests. Run
+them from a local checkout, or from a repo-built `ebpf-tracker` binary that can
+still resolve that checkout. A `cargo install`ed binary does not bundle demo
+manifests.
+
+Demo and replay entry points:
 
 ```bash
-./target/debug/ebpf-tracker see postcard-generator-rust
+ebpf-tracker demo --dashboard session-io-demo
+ebpf-tracker see
+```
+
+`see` is a shortcut for the dashboard demo experience. You can also target a
+specific example:
+
+```bash
+ebpf-tracker see postcard-generator-rust
 cargo see postcard-generator-rust
 ```
 
@@ -132,6 +142,13 @@ Log locations:
 
 - regular `run` sessions write under the current project's `./logs`
 - `demo` and `see` sessions write under `examples/<demo-name>/logs/`
+
+If you are working from a clone, the `cargo demo`, `cargo see`, and
+`cargo viewer` aliases are the quickest way to reach the repo-local demos and
+viewer. If you are invoking a repo-built binary outside the repo root, use
+`ebpf-tracker demo ...` and `ebpf-tracker see ...` instead. A `cargo install`ed
+binary should use the regular `run` or `--dashboard` paths because demo
+manifests are not bundled.
 
 Replay example:
 
@@ -239,10 +256,10 @@ cp ebpf-tracker.toml.example ebpf-tracker.toml
 ebpf-tracker cargo run
 ```
 
-Repository demo check:
+Repository demo check from a local checkout:
 
 ```bash
-ebpf-tracker demo --list
+cargo demo --list
 ```
 
 Expected today:

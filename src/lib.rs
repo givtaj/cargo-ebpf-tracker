@@ -279,6 +279,9 @@ fn print_usage() {
     eprintln!("Default transport: bpftrace");
     eprintln!("Default runtime: auto");
     eprintln!("Default dashboard port: {DEFAULT_DASHBOARD_PORT}");
+    eprintln!("First run: ebpf-tracker /bin/true");
+    eprintln!("Trace your app: ebpf-tracker cargo run");
+    eprintln!("Try the dashboard from a checkout: cargo demo --dashboard session-io-demo");
     eprintln!("Example: ebpf-tracker cargo run");
     eprintln!("Example: ebpf-tracker npm test");
     eprintln!("Example: ebpf-tracker --config ebpf-tracker.toml cargo run");
@@ -296,10 +299,13 @@ fn print_usage() {
     eprintln!("Example: ebpf-tracker demo --dashboard session-io-demo");
     eprintln!("Example: ebpf-tracker see");
     eprintln!("Example: ebpf-tracker see postcard-generator-rust");
-    eprintln!("Repository demo mode: ebpf-tracker demo --list");
-    eprintln!("Repository demo example: ebpf-tracker demo --emit jsonl session-io-demo");
+    eprintln!("Repository demo mode: cargo demo --list");
+    eprintln!("Repository demo example: cargo demo --emit jsonl session-io-demo");
+    eprintln!("Clone-only helpers: cargo demo, cargo see, cargo viewer");
     eprintln!("The see subcommand is a shortcut for the dashboard demo experience.");
-    eprintln!("The demo subcommand expects a local clone of ebpf-tracker.");
+    eprintln!(
+        "The demo and see subcommands require a local ebpf-tracker checkout or a repo-built ebpf-tracker binary."
+    );
     eprintln!(
         "The attach subcommand is experimental scaffold/plan mode and does not start tracing yet."
     );

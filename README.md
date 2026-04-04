@@ -4,6 +4,34 @@
 as `cargo run` or `npm run`, runs them inside a Linux Docker runtime, and
 attaches tracing for the lifetime of that session.
 
+## Choose Your Path
+
+If you want to trace your own project, start with the installable CLI and run a
+real smoke test:
+
+```bash
+ebpf-tracker /bin/true
+ebpf-tracker cargo run
+```
+
+Expect the full wrapped session, including build tooling such as `cargo`,
+`rustc`, and linkers before your app starts.
+
+If you want the product experience first from a local checkout, use one of the
+demo/dashboard entry points:
+
+```bash
+cargo demo --dashboard session-io-demo
+cargo see
+```
+
+Run either command, not both at once. Each command opens the browser dashboard,
+preserves replay logs, and is a supported first-run path for the bundled demos.
+If you are invoking a repo-built binary directly, the same entry points are
+`ebpf-tracker demo --dashboard session-io-demo` and `ebpf-tracker see`. The
+`cargo demo`, `cargo see`, and `cargo viewer` aliases are clone-only
+conveniences for people working from this repository.
+
 This README stays intentionally high level. The root should explain the product
 and the workspace shape. Detailed CLI behavior, install steps, and run modes
 belong in [`docs/cli.md`](./docs/cli.md).
